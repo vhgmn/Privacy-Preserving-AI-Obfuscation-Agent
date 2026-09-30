@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local-only data — never commit
+data/
+profiles/
+screenshots/
+*.png
+*.log
+.env
+config.local.*
