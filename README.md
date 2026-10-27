@@ -8,9 +8,10 @@ projects and habits, who will browse the web on their own schedule.
 All planning runs on a **local LLM** ([Ollama](https://ollama.com)), so no cloud
 service ever learns which traffic is fake.
 
-> **Status:** early development. The Persona Engine (phase 1), the Daily Planner
-> (phase 2) and a first version of the Browser Agent (phase 3) work; sessions are
-> still started by hand, as the scheduler is not built yet. See the [roadmap](#roadmap).
+> **Status:** early development. Personas (phase 1), daily plans (phase 2), the
+> browser agent (phase 3, first version) and the scheduler (phase 4) work; the
+> scheduler is started by hand and still being tried out. Evaluation is next. See the
+> [roadmap](#roadmap).
 
 ## Principles
 
@@ -89,6 +90,29 @@ Rules the agent never breaks:
 What it did is written to `data/logs/<date>/<persona-id>.jsonl` (searches, pages and
 reading times; no screenshots), for the evaluation phase.
 
+## How the Scheduler works
+
+`python -m agent.scheduler run` keeps running in a terminal and checks once a minute
+whether it is time for a session.
+
+- **Each day** it first refreshes the personas' projects and plans the day.
+- **Your rhythm:** it notes in which hours you use the computer (keyboard or mouse
+  input in the last 2 minutes, via Windows `GetLastInputInfo`) and, after a week,
+  only runs sessions in your usual waking hours (08:00–23:00 until then). This record
+  describes you, so it stays in `data/activity/` and never leaves the machine.
+- **Timing** is bursty like real browsing: the pause before the next session is
+  log-normal, from minutes to hours, and shrinks when many sessions are left.
+- **Mostly while you are active**, so your real traffic is mixed with decoy traffic.
+  When you are away, a due session runs only sometimes (about 30%), and then short:
+  one search, one page.
+- **Out of your way:** Chrome starts off-screen and is moved to its own Windows
+  virtual desktop, *Decoy browsing* (see it with Win+Tab). Pages are driven through
+  the DevTools protocol, so the window never needs focus.
+- **One browser at a time**, and what is done is saved in `data/state/<date>.json`, so
+  a restart never repeats a session.
+- **On a bot check** the persona rests until the next day, all searches pause for
+  3 hours, and a Windows notification tells you.
+
 ## Armenian queries
 
 The small LLM writes good English and Russian but cannot write Armenian (it invents
@@ -157,6 +181,11 @@ profiles would be uploaded.
 # carry out one planned session in the persona's Chrome (a few minutes; don't touch the window)
 .venv\Scripts\python.exe -m agent.browser check <persona-id>
 .venv\Scripts\python.exe -m agent.browser run <persona-id> --session 1 [--date YYYY-MM-DD]
+
+# let the agent run on its own schedule (leave the terminal open; Ctrl+C stops)
+.venv\Scripts\python.exe -m agent.scheduler run
+.venv\Scripts\python.exe -m agent.scheduler status
+.venv\Scripts\python.exe -m agent.scheduler next   # run one pending session now, for trying out
 ```
 
 ## Tests
@@ -191,6 +220,14 @@ agent/
     sites.py          DuckDuckGo, result pages and YouTube; bot-check and cookie-banner handling
     runner.py         persona's Chrome profile, runs a session, writes the log
     __main__.py       command line
+  scheduler/
+    timing.py         when to run: waking hours, active vs. away, log-normal pauses
+    rhythm.py         idle time from Windows and the learned daily rhythm
+    state.py          what is done today (data/state/<date>.json)
+    desktop.py        moves the decoy Chrome to its own virtual desktop
+    notify.py         Windows toast notifications
+    daemon.py         the loop: prepare the day, run sessions, pause on bot checks
+    __main__.py       command line
 tests/                unit tests
 ```
 
@@ -201,7 +238,8 @@ tests/                unit tests
 2. ✅ **Daily Planner**: search journeys (query → click → read → follow-up) per persona
 3. ✅ **Browser Agent** (v1): human-like typing, scrolling and reading time; one Chrome profile per persona.
    Next: follow-up searches based on the real results
-4. Scheduler: bursty, log-normal sessions within the user's waking hours; Windows idle detection
+4. ✅ **Scheduler**: bursty, log-normal sessions within the user's waking hours; Windows idle detection;
+   own virtual desktop. Next: start automatically at logon
 5. Evaluation: an LLM "tracker's eye view" and a real-vs-decoy classifier
 6. Optional routing of decoy traffic through the Nym mixnet
 7. Threat model and ethics documentation

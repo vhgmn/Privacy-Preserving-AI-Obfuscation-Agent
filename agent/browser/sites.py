@@ -153,7 +153,17 @@ def open_result(page: Page, mouse: Mouse, rank: int, visited: set[str]) -> str:
     link = links.nth(index)
     # Results open in the same tab, so 'back' returns to them for the next click.
     link.evaluate("a => a.removeAttribute('target')")
-    mouse.click(link)
+    left_search = lambda: not urlparse(page.url).netloc.endswith("duckduckgo.com")  # noqa: E731
+    # A first-visit overlay can swallow a click; a person would simply click again.
+    for attempt in (1, 2):
+        mouse.click(link)
+        try:
+            wait_until(page, left_search, "the result page to open", timeout_s=10)
+            break
+        except PlaywrightError:
+            if attempt == 2:
+                raise
+            page.keyboard.press("Escape")
     page.wait_for_load_state("domcontentloaded", timeout=LOAD_TIMEOUT_MS)
     visited.update({hrefs[index], page.url})  # both: the link may redirect
     check_not_blocked(page)

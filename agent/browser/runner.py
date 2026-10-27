@@ -43,19 +43,32 @@ class SessionLog:
 
 
 @contextmanager
-def persona_browser(persona: Persona) -> Iterator[BrowserContext]:
-    """Real Chrome, visible, with a persistent profile that belongs to this persona only."""
+def persona_browser(persona: Persona, on_own_desktop: bool = False, echo=print) -> Iterator[BrowserContext]:
+    """Real Chrome (never headless) with a persistent profile that belongs to this persona only.
+
+    With `on_own_desktop`, the window goes to a separate Windows virtual desktop so it does
+    not get in the user's way.
+    """
+    args = list(CHROME_ARGS)
+    before: set[int] = set()
+    if on_own_desktop:
+        from agent.scheduler import desktop
+
+        args += desktop.OFFSCREEN_ARGS + desktop.KEEP_RUNNING_ARGS
+        before = desktop.chrome_windows()
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=str(config.PROFILES_DIR / persona.id),
             channel="chrome",
             headless=False,
-            args=CHROME_ARGS,
+            args=args,
             ignore_default_args=["--enable-automation"],
             accept_downloads=False,
             no_viewport=True,  # use the real window size, like a person's browser
         )
         try:
+            if on_own_desktop:
+                echo(f"  window: {desktop.hide_new_windows(before)}")
             yield context
         finally:
             context.close()
