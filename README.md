@@ -8,9 +8,9 @@ projects and habits, who will browse the web on their own schedule.
 All planning runs on a **local LLM** ([Ollama](https://ollama.com)), so no cloud
 service ever learns which traffic is fake.
 
-> **Status:** early development. The Persona Engine (phase 1) and the Daily Planner
-> (phase 2) work; the browser agent and scheduler are not built yet. See the
-> [roadmap](#roadmap).
+> **Status:** early development. The Persona Engine (phase 1), the Daily Planner
+> (phase 2) and a first version of the Browser Agent (phase 3) work; sessions are
+> still started by hand, as the scheduler is not built yet. See the [roadmap](#roadmap).
 
 ## Principles
 
@@ -61,6 +61,34 @@ them for ones based on what the real results showed.
 Every query is safety-checked and must be written in the session's language: an
 Armenian query with Cyrillic or stray foreign letters is rejected.
 
+## How the Browser Agent works
+
+A planned session is carried out in **real, visible Google Chrome**, in a persistent
+profile that belongs to that persona only (`profiles/<persona-id>/`), so each persona
+builds up its own cookies and history.
+
+- **Typing** goes letter by letter with irregular pauses; at the persona's typo rate a
+  wrong letter slips in and is deleted again a moment later.
+- **The mouse** moves along curved paths to what it clicks; **scrolling** comes in
+  irregular bursts, now and then back up.
+- **Reading time** follows the page length, the persona's reading speed and patience
+  (20 s to 4 min). A page already read in the session is not opened again.
+- **YouTube** videos are watched for 30 s to 3 min; Chrome runs muted.
+- Chrome starts without the automation flag, so `navigator.webdriver` is `false`
+  (check with `python -m agent.browser check <persona-id>`). No other "stealth"
+  tricks are used.
+
+Rules the agent never breaks:
+
+- On a **CAPTCHA or bot check it stops** the session and reports it. It never tries
+  to solve or get around one.
+- On a **cookie banner it only ever clicks "Reject"**; if there is none, it leaves the
+  banner alone.
+- It **never fills in forms, signs in, downloads files or clicks ads**.
+
+What it did is written to `data/logs/<date>/<persona-id>.jsonl` (searches, pages and
+reading times; no screenshots), for the evaluation phase.
+
 ## Armenian queries
 
 The small LLM writes good English and Russian but cannot write Armenian (it invents
@@ -93,7 +121,7 @@ are not part of this repository, whose code is MIT.
 - Python 3.12
 - [Ollama](https://ollama.com) with the model pulled: `ollama pull qwen2.5:3b`
 - Optional, for Armenian queries: the NLLB model (see [Armenian queries](#armenian-queries))
-- Google Chrome (used by the future browser agent)
+- Google Chrome (the browser agent drives your installed Chrome, not a bundled browser)
 
 Keep Ollama on local models only; do not enable network exposure.
 
@@ -125,6 +153,10 @@ profiles would be uploaded.
 # plan today's sessions for every persona (a few minutes on a CPU)
 .venv\Scripts\python.exe -m agent.planner today
 .venv\Scripts\python.exe -m agent.planner show <persona-id> [--date YYYY-MM-DD]
+
+# carry out one planned session in the persona's Chrome (a few minutes; don't touch the window)
+.venv\Scripts\python.exe -m agent.browser check <persona-id>
+.venv\Scripts\python.exe -m agent.browser run <persona-id> --session 1 [--date YYYY-MM-DD]
 ```
 
 ## Tests
@@ -154,6 +186,11 @@ agent/
     planner.py        topic, language and query choice for each session
     store.py          atomic JSON storage in data/plans/<date>/
     __main__.py       command line
+  browser/
+    human.py          typing, typos, mouse paths, scrolling, reading and watching times
+    sites.py          DuckDuckGo, result pages and YouTube; bot-check and cookie-banner handling
+    runner.py         persona's Chrome profile, runs a session, writes the log
+    __main__.py       command line
 tests/                unit tests
 ```
 
@@ -162,7 +199,8 @@ tests/                unit tests
 0. ✅ Setup: local LLM, dependencies, real Chrome via Playwright
 1. ✅ **Persona Engine**
 2. ✅ **Daily Planner**: search journeys (query → click → read → follow-up) per persona
-3. Browser Agent: human-like typing, scrolling and reading time; one Chrome profile per persona
+3. ✅ **Browser Agent** (v1): human-like typing, scrolling and reading time; one Chrome profile per persona.
+   Next: follow-up searches based on the real results
 4. Scheduler: bursty, log-normal sessions within the user's waking hours; Windows idle detection
 5. Evaluation: an LLM "tracker's eye view" and a real-vs-decoy classifier
 6. Optional routing of decoy traffic through the Nym mixnet
