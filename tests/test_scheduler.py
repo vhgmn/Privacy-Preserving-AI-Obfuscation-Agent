@@ -12,6 +12,7 @@ from agent.planner.planner import plan_day
 from agent.scheduler import timing
 from agent.scheduler.daemon import SEARCH_PAUSE, Daemon
 from agent.scheduler.rhythm import MIN_DAYS_TO_LEARN, Rhythm
+from agent.scheduler.state import RUNNING_STALE_AFTER as STALE_AFTER
 from agent.scheduler.state import DayState
 from tests.test_persona_schema import make_persona
 from tests.test_planner import PlannerLLM, fake_translate
@@ -165,6 +166,28 @@ class DaemonTest(unittest.TestCase):
         self.now = NOON + timedelta(hours=5)
         daemon.tick()
         self.assertEqual(len(self.runs), 1)  # the persona stays paused for the day
+
+    def test_chrome_is_marked_busy_during_a_session(self):
+        seen = []
+        daemon = self.daemon()
+        daemon.run_fn = lambda *args: seen.append(DayState.load(DAY).busy(self.now)) or "done"
+        daemon.tick()
+        self.assertEqual(len(seen), 1)
+        self.assertIn(self.persona.name, seen[0])
+        self.assertIsNone(DayState.load(DAY).busy(self.now))
+
+    def test_waits_while_someone_else_has_chrome(self):
+        daemon = self.daemon()
+        daemon.tick()  # prepares and runs one
+        state = DayState.load(DAY)
+        self.now = state.next_due
+        state.start("fingerprint audit", self.now)
+        state.save()
+        daemon.tick()
+        self.assertEqual(len(self.runs), 1)
+        self.now += STALE_AFTER  # a mark left by a crash does not block forever
+        daemon.tick()
+        self.assertEqual(len(self.runs), 2)
 
     def test_nothing_at_night(self):
         self.now = datetime(2026, 1, 15, 3, 0)

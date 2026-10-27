@@ -32,13 +32,23 @@ def cmd_next(args) -> int:
             return 1
         state.prepared = True
         state.save()
+    busy = state.busy(now)
+    if busy:
+        print(f"Chrome is in use ({busy}); try again later.")
+        return 1
     pending = daemon.pending(state, now)
     if not pending:
         print("Nothing pending today.")
         return 0
     persona, number, session = pending[0]
     print(f"{persona.name} session {number}: [{session.language}] {session.topic}")
-    outcome = daemon.run_fn(persona, number, session, "full")
+    state.start(f"{persona.name} #{number}", now)
+    state.save()
+    try:
+        outcome = daemon.run_fn(persona, number, session, "full")
+    finally:
+        state.finish()
+        state.save()
     state.mark(persona.id, number, outcome)
     state.save()
     print(f"-> {outcome}")
@@ -56,6 +66,8 @@ def cmd_status(args) -> int:
     print(f"Waking hours: {', '.join(f'{h:02d}' for h in waking)}"
           f" ({'learned' if learned else f'default until {MIN_DAYS_TO_LEARN} days are recorded; {past_days} so far'})")
     print(f"Prepared today: {state.prepared}; next session due: {state.next_due or 'when active'}")
+    if state.busy(now):
+        print(f"Chrome in use: {state.running} since {state.running_since:%H:%M}")
     if state.search_paused_until:
         print(f"Searches paused until {state.search_paused_until:%H:%M} (bot check)")
     names = {p.id: p.name for p in persona_store.list_all()}

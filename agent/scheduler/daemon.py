@@ -61,6 +61,8 @@ class Daemon:
                 return
             state.prepared = True
             state.save()
+        if state.busy(now):
+            return  # e.g. the fingerprint audit has Chrome
 
         pending = self.pending(state, now)
         if not pending:
@@ -77,7 +79,13 @@ class Daemon:
         if mode == "short":
             session = short_version(session)
         self.echo(f"{now:%H:%M} {persona.name} session {number} ({mode}): [{session.language}] {session.topic}")
-        outcome = self.run_fn(persona, number, session, mode)
+        state.start(f"{persona.name} #{number}", now)
+        state.save()
+        try:
+            outcome = self.run_fn(persona, number, session, mode)
+        finally:
+            state.finish()
+            state.save()
         self.echo(f"        -> {outcome}")
 
         state.mark(persona.id, number, outcome)

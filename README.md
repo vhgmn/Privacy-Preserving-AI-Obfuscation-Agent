@@ -10,8 +10,8 @@ service ever learns which traffic is fake.
 
 > **Status:** early development. Personas (phase 1), daily plans (phase 2), the
 > browser agent (phase 3, first version) and the scheduler (phase 4) work; the
-> scheduler is started by hand and still being tried out. Evaluation is next. See the
-> [roadmap](#roadmap).
+> scheduler is started by hand and still being tried out. Evaluation (phase 5) has
+> begun with a fingerprint audit. See the [roadmap](#roadmap).
 
 ## Principles
 
@@ -108,10 +108,33 @@ whether it is time for a session.
 - **Out of your way:** Chrome starts off-screen and is moved to its own Windows
   virtual desktop, *Decoy browsing* (see it with Win+Tab). Pages are driven through
   the DevTools protocol, so the window never needs focus.
-- **One browser at a time**, and what is done is saved in `data/state/<date>.json`, so
+- **One browser at a time** (the state file also records who is using Chrome, so the
+  fingerprint audit and the scheduler never open a profile twice), and what is done is saved in `data/state/<date>.json`, so
   a restart never repeats a session.
 - **On a bot check** the persona rests until the next day, all searches pause for
   3 hours, and a Windows notification tells you.
+
+## Evaluation: fingerprint audit
+
+Separate profiles keep cookies apart, but a site can also recognise a browser by its
+**fingerprint**: user agent, screen, time zone, languages, graphics card, fonts, how
+it draws a test image, and so on. `python -m agent.evaluation fingerprint` records
+these in every persona's Chrome; `--mine` records your own Chrome through a one-time
+page on `127.0.0.1` (open the printed address in your usual Chrome). Nothing goes to
+an external fingerprinting site; the results stay in `data/eval/fingerprints/`.
+`fingerprint-report` compares them.
+
+First result (one laptop, Chrome 155): the personas and the user's own Chrome were
+identical in 23 of 24 attributes. The only difference was the language list: fresh
+profiles had Chrome's default, the user's Chrome had their own. That is the one thing
+that would let a tracker tell the user apart from the decoys on the same device, so
+each persona's Chrome now gets the user's language list (taken from the latest
+`--mine` audit, kept local). After that: 24 of 24.
+
+What this means: until traffic goes through Nym, **all profiles share one IP address
+and one device fingerprint**, so a tracker that links by fingerprint sees one device.
+The decoys then do not pose as separate people; they blend into the same device's
+traffic, where the user's own browsing must not stand out.
 
 ## Armenian queries
 
@@ -182,6 +205,11 @@ profiles would be uploaded.
 .venv\Scripts\python.exe -m agent.browser check <persona-id>
 .venv\Scripts\python.exe -m agent.browser run <persona-id> --session 1 [--date YYYY-MM-DD]
 
+# fingerprint audit: every persona profile, then your own Chrome (open the printed address), then compare
+.venv\Scripts\python.exe -m agent.evaluation fingerprint
+.venv\Scripts\python.exe -m agent.evaluation fingerprint --mine
+.venv\Scripts\python.exe -m agent.evaluation fingerprint-report
+
 # let the agent run on its own schedule (leave the terminal open; Ctrl+C stops)
 .venv\Scripts\python.exe -m agent.scheduler run
 .venv\Scripts\python.exe -m agent.scheduler status
@@ -228,6 +256,9 @@ agent/
     notify.py         Windows toast notifications
     daemon.py         the loop: prepare the day, run sessions, pause on bot checks
     __main__.py       command line
+  evaluation/
+    fingerprint.py    local fingerprint probe, the one-time 127.0.0.1 page, comparison report
+    __main__.py       command line
 tests/                unit tests
 ```
 
@@ -240,7 +271,8 @@ tests/                unit tests
    Next: follow-up searches based on the real results
 4. ✅ **Scheduler**: bursty, log-normal sessions within the user's waking hours; Windows idle detection;
    own virtual desktop. Next: start automatically at logon
-5. Evaluation: an LLM "tracker's eye view" and a real-vs-decoy classifier
+5. Evaluation: ✅ fingerprint audit (persona profiles vs. the user's Chrome); next: an LLM
+   "tracker's eye view", a real-vs-decoy classifier, and which tracker domains see each persona
 6. Optional routing of decoy traffic through the Nym mixnet
 7. Threat model and ethics documentation
 

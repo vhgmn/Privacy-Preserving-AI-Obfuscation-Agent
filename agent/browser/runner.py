@@ -42,6 +42,35 @@ class SessionLog:
             file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def match_user_languages(profile_dir: Path, languages: str | None) -> bool:
+    """Gives the persona's Chrome the user's language list (navigator.languages, Accept-Language).
+
+    All profiles share one device fingerprint, so a different language list would be the
+    one thing that tells the user apart from the decoys. Returns True if it changed anything.
+    """
+    if not languages:
+        return False
+    path = profile_dir / "Default" / "Preferences"
+    try:
+        prefs = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        prefs = {}
+    intl = prefs.setdefault("intl", {})
+    if intl.get("selected_languages") == languages and intl.get("accept_languages") == languages:
+        return False
+    intl["selected_languages"] = intl["accept_languages"] = languages  # newer and older Chrome
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(prefs, ensure_ascii=False), encoding="utf-8")
+    return True
+
+
+def _user_languages() -> str | None:
+    from agent.evaluation.fingerprint import latest_mine
+
+    mine = latest_mine()
+    return mine.get("languages") if mine else None
+
+
 @contextmanager
 def persona_browser(persona: Persona, on_own_desktop: bool = False, echo=print) -> Iterator[BrowserContext]:
     """Real Chrome (never headless) with a persistent profile that belongs to this persona only.
@@ -56,9 +85,11 @@ def persona_browser(persona: Persona, on_own_desktop: bool = False, echo=print) 
 
         args += desktop.OFFSCREEN_ARGS + desktop.KEEP_RUNNING_ARGS
         before = desktop.chrome_windows()
+    profile_dir = config.PROFILES_DIR / persona.id
+    match_user_languages(profile_dir, _user_languages())
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
-            user_data_dir=str(config.PROFILES_DIR / persona.id),
+            user_data_dir=str(profile_dir),
             channel="chrome",
             headless=False,
             args=args,

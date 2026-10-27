@@ -4,10 +4,13 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from agent import config
+
+# A "running" mark older than this is left over from a crash and is ignored.
+RUNNING_STALE_AFTER = timedelta(hours=1)
 
 
 @dataclass
@@ -18,6 +21,20 @@ class DayState:
     paused_personas: list[str] = field(default_factory=list)  # hit a bot check today
     search_paused_until: datetime | None = None
     next_due: datetime | None = None
+    running: str | None = None  # who has Chrome right now (a session or the fingerprint audit)
+    running_since: datetime | None = None
+
+    def start(self, who: str, now: datetime) -> None:
+        self.running, self.running_since = who, now
+
+    def finish(self) -> None:
+        self.running = self.running_since = None
+
+    def busy(self, now: datetime) -> str | None:
+        """Who is using Chrome, or None. Only one Chrome runs at a time; profiles cannot be opened twice."""
+        if self.running and self.running_since and now - self.running_since < RUNNING_STALE_AFTER:
+            return self.running
+        return None
 
     def mark(self, persona_id: str, number: int, outcome: str) -> None:
         self.done.setdefault(persona_id, {})[str(number)] = outcome
@@ -37,6 +54,8 @@ class DayState:
             "paused_personas": self.paused_personas,
             "search_paused_until": self.search_paused_until.isoformat() if self.search_paused_until else None,
             "next_due": self.next_due.isoformat() if self.next_due else None,
+            "running": self.running,
+            "running_since": self.running_since.isoformat() if self.running_since else None,
         }
 
     @classmethod
@@ -48,7 +67,8 @@ class DayState:
         parse = lambda v: datetime.fromisoformat(v) if v else None  # noqa: E731
         return cls(day=day, prepared=bool(data.get("prepared")), done=data.get("done") or {},
                    paused_personas=list(data.get("paused_personas") or []),
-                   search_paused_until=parse(data.get("search_paused_until")), next_due=parse(data.get("next_due")))
+                   search_paused_until=parse(data.get("search_paused_until")), next_due=parse(data.get("next_due")),
+                   running=data.get("running"), running_since=parse(data.get("running_since")))
 
     def save(self, directory: Path | None = None) -> None:
         path = self.path(self.day, directory)
