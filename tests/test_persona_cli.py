@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import io
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from unittest import mock
 from agent import config
 from agent.persona import store
 from agent.persona.__main__ import main
+from agent.persona.generator import GenerationError
 from tests.test_persona_schema import make_persona
 
 
@@ -41,6 +43,24 @@ class PersonaCliTest(unittest.TestCase):
         self.assertIn('"occupation": "architect"', self.run_cli("show", "0a1b2c3d")[1])
         self.assertEqual(self.run_cli("delete", "0a1b2c3d")[0], 0)
         self.assertIn("No personas yet", self.run_cli("list")[1])
+
+    def test_refresh_saves_updates_and_keeps_failures_unchanged(self):
+        ok, broken = make_persona(id="00000001"), make_persona(id="00000002", occupation="pilot")
+        store.save(ok)
+        store.save(broken)
+        before = (Path(self._tmp.name) / "00000002.json").read_text(encoding="utf-8")
+
+        def fake_refresh(persona, others):
+            if persona.id == "00000002":
+                raise GenerationError("model gave up")
+            return dataclasses.replace(persona, occupation="baker")
+
+        with mock.patch("agent.persona.__main__.refresh_persona", side_effect=fake_refresh):
+            code, out, err = self.run_cli("refresh")
+        self.assertEqual(code, 1)
+        self.assertIn("left unchanged", err)
+        self.assertEqual(store.load("00000001").occupation, "baker")
+        self.assertEqual((Path(self._tmp.name) / "00000002.json").read_text(encoding="utf-8"), before)
 
     def test_show_unknown_id_is_an_error(self):
         code, _, err = self.run_cli("show", "ffffffff")

@@ -85,6 +85,19 @@ class PersonaSchemaTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             Persona.from_dict(data)
 
+    def test_v1_file_is_migrated(self):
+        data = make_persona().to_dict()
+        del data["past_projects"]
+        data["schema_version"] = 1
+        persona = Persona.from_dict(data)
+        self.assertEqual(persona.schema_version, 2)
+        self.assertEqual(persona.past_projects, [])
+
+    def test_rejects_invalid_past_projects(self):
+        for label, value in {"too many": [f"p{n}" for n in range(11)], "empty item": [" "], "not a list": "x"}.items():
+            with self.subTest(label), self.assertRaises(ValueError):
+                make_persona(past_projects=value)
+
     def test_from_dict_rejects_wrong_schema_version(self):
         data = make_persona().to_dict()
         data["schema_version"] = 99

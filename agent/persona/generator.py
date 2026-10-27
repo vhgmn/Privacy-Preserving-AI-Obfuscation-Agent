@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import random
 from datetime import datetime, timedelta, timezone
@@ -7,7 +8,7 @@ from typing import Callable, Iterable
 
 from agent import config, llm
 from agent.persona.names import FEMALE_NAMES, MALE_NAMES
-from agent.persona.schema import AGE_GROUPS, QUERY_STYLES, Behavior, Interest, Persona
+from agent.persona.schema import AGE_GROUPS, MAX_PAST_PROJECTS, QUERY_STYLES, Behavior, Interest, Persona
 
 LLM = Callable[..., str]  # same signature as llm.generate
 MAX_ATTEMPTS = 3
@@ -245,3 +246,61 @@ def generate_persona(existing: Iterable[Persona] = (), llm_fn: LLM = llm.generat
         )
     except ValueError as exc:
         raise GenerationError(f"assembly: {exc}") from exc
+
+
+# --- rotation: projects end and new ones begin, like in a real person's life ---
+
+def _stored_context(persona: Persona) -> str:
+    # The bio and gender used at creation are not stored; the name list tells the
+    # gender, and long-term interests describe the person at least as well as a bio.
+    gender = "woman" if persona.name in FEMALE_NAMES else "man"
+    hobbies = ", ".join(i.topic for i in persona.interests if i.kind == "long_term")
+    context = (f"A {gender}, {persona.occupation}, aged {persona.age_group}, living in {persona.city}, Armenia. "
+               f"Long-term interests: {hobbies}.")
+    if persona.past_projects:
+        context += f" Recently finished projects: {', '.join(persona.past_projects[-3:])}."
+    return context
+
+
+def refresh_persona(persona: Persona, others: Iterable[Persona] = (), llm_fn: LLM = llm.generate,
+                    rng: random.Random | None = None, now: datetime | None = None) -> Persona | None:
+    """Replaces each expired project with a new one.
+
+    Returns the updated persona, or None when nothing has expired (no LLM calls then).
+    Does not save; on failure raises GenerationError and the original stays untouched.
+    """
+    rng = rng or random.SystemRandom()
+    now = now or datetime.now(timezone.utc)
+    expired = [i for i in persona.interests if i.kind == "project" and i.expires_at <= now]
+    if not expired:
+        return None
+
+    kept = [i for i in persona.interests if i not in expired]
+    past_projects = (persona.past_projects + [i.topic for i in expired])[-MAX_PAST_PROJECTS:]
+    context = _stored_context(dataclasses.replace(persona, past_projects=past_projects))
+    taken_topics = ({_key(i.topic) for p in [persona, *others] for i in p.interests}
+                    | {_key(t) for t in past_projects})
+
+    # A new project gets a weight comparable to the interests already there.
+    average = sum(i.weight for i in kept) / len(kept)
+    new_projects = []
+    for _ in expired:
+        category = rng.choice(config.PROJECT_CATEGORIES)
+        item = _retry("new project", lambda: _replacement(llm_fn, context, "project", category, taken_topics))
+        taken_topics.add(_key(item["topic"]))
+        new_projects.append(Interest(
+            topic=item["topic"].strip(),
+            description=item["description"].strip(),
+            kind="project",
+            weight=average * rng.uniform(0.5, 1.5),
+            created_at=now,
+            expires_at=now + timedelta(days=rng.randint(7, 42)),
+        ))
+
+    interests = kept + new_projects
+    total = sum(i.weight for i in interests)
+    interests = [dataclasses.replace(i, weight=round(i.weight / total, 3)) for i in interests]
+    try:
+        return dataclasses.replace(persona, interests=interests, past_projects=past_projects)
+    except ValueError as exc:
+        raise GenerationError(f"refresh: {exc}") from exc

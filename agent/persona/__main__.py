@@ -7,7 +7,7 @@ import httpx
 
 from agent import config
 from agent.persona import store
-from agent.persona.generator import GenerationError, generate_persona
+from agent.persona.generator import GenerationError, generate_persona, refresh_persona
 from agent.persona.schema import Persona
 
 
@@ -41,6 +41,35 @@ def cmd_generate(args) -> int:
     return 0
 
 
+def cmd_refresh(args) -> int:
+    personas = store.list_all()
+    if not personas:
+        print("No personas yet. Run: python -m agent.persona generate")
+        return 0
+    failed = 0
+    for index, persona in enumerate(personas):
+        others = personas[:index] + personas[index + 1:]
+        try:
+            updated = refresh_persona(persona, others)
+        except httpx.HTTPError as exc:
+            print(f"error: cannot reach Ollama at 127.0.0.1:11434 ({exc}). Is it running?", file=sys.stderr)
+            return 1
+        except GenerationError as exc:
+            print(f"{persona.id}  {persona.name}: error, left unchanged: {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        if updated is None:
+            print(f"{persona.id}  {persona.name}: no expired projects")
+            continue
+        store.save(updated)
+        personas[index] = updated  # later personas must avoid the new topics too
+        current = {i.topic for i in updated.interests}
+        finished = [i.topic for i in persona.interests if i.topic not in current]
+        print(f"{persona.id}  {persona.name}: finished {', '.join(finished)}")
+        print(_summary(updated), flush=True)
+    return 1 if failed else 0
+
+
 def cmd_list(args) -> int:
     personas = store.list_all()
     if not personas:
@@ -67,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     gen = sub.add_parser("generate", help=f"create personas up to {config.PERSONA_COUNT}")
     gen.add_argument("--count", type=int, help="create exactly this many more")
     gen.set_defaults(func=cmd_generate)
+    sub.add_parser("refresh", help="replace expired projects with new ones").set_defaults(func=cmd_refresh)
     sub.add_parser("list", help="list personas").set_defaults(func=cmd_list)
     for name, func, text in (("show", cmd_show, "print one persona as JSON"), ("delete", cmd_delete, "delete one persona")):
         p = sub.add_parser(name, help=text)

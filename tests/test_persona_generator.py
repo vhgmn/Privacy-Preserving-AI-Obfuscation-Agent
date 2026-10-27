@@ -1,11 +1,12 @@
 import json
 import random
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from agent import config
-from agent.persona.generator import GenerationError, generate_persona
+from agent.persona.generator import GenerationError, generate_persona, refresh_persona
 from agent.persona.names import FEMALE_NAMES, MALE_NAMES
+from agent.persona.schema import MAX_PAST_PROJECTS
 from tests.test_persona_schema import make_persona
 
 NOW = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
@@ -152,6 +153,52 @@ class GeneratorTest(unittest.TestCase):
         no_projects = {"long_term": INTERESTS["long_term"]}
         with self.assertRaisesRegex(GenerationError, "projects"):
             generate(FakeLLM(interests=[json.dumps(no_projects)]))
+
+
+class RefreshTest(unittest.TestCase):
+    LATER = NOW + timedelta(weeks=4)  # make_persona's "washing machine" project ends after 3 weeks
+
+    def refresh(self, persona, fake, now=LATER, others=()):
+        return refresh_persona(persona, others, llm_fn=fake, rng=random.Random(7), now=now)
+
+    def test_replaces_expired_project(self):
+        updated = self.refresh(make_persona(), FakeLLM())
+        topics = {i.topic for i in updated.interests}
+        self.assertNotIn("washing machine", topics)
+        self.assertIn("backup topic 1", topics)
+        self.assertTrue({"houseplants", "football"} <= topics)
+        self.assertEqual(updated.past_projects, ["washing machine"])
+        new = next(i for i in updated.interests if i.topic == "backup topic 1")
+        self.assertEqual(new.kind, "project")
+        self.assertGreater(new.expires_at, self.LATER)
+        self.assertAlmostEqual(sum(i.weight for i in updated.interests), 1.0, places=2)
+
+    def test_nothing_expired_means_no_llm_calls(self):
+        fake = FakeLLM()
+        self.assertIsNone(self.refresh(make_persona(), fake, now=NOW))
+        self.assertEqual(fake.calls, [])
+
+    def test_past_projects_are_capped(self):
+        old = [f"old project {n}" for n in range(MAX_PAST_PROJECTS)]
+        updated = self.refresh(make_persona(past_projects=old), FakeLLM())
+        self.assertEqual(len(updated.past_projects), MAX_PAST_PROJECTS)
+        self.assertEqual(updated.past_projects[-1], "washing machine")
+        self.assertNotIn("old project 0", updated.past_projects)
+
+    def test_context_names_gender_and_finished_projects(self):
+        fake = FakeLLM()
+        self.refresh(make_persona(name="Անի"), fake)
+        prompt = next(p for p, _ in fake.calls if "Suggest one more" in p)
+        self.assertIn("A woman", prompt)
+        self.assertIn("Recently finished projects: washing machine", prompt)
+        self.assertNotIn("Անի", prompt)
+
+    def test_failure_raises_and_leaves_original_untouched(self):
+        persona = make_persona()
+        before = persona.to_dict()
+        with self.assertRaises(GenerationError):
+            self.refresh(persona, FakeLLM(sensitive={"backup"}))
+        self.assertEqual(persona.to_dict(), before)
 
 
 if __name__ == "__main__":

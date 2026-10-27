@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from agent import config
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 AGE_GROUPS = ("18-24", "25-34", "35-44", "45-54", "55+")
 INTEREST_KINDS = ("long_term", "project")
 QUERY_STYLES = ("keywords", "questions", "mixed")
 MIN_INTERESTS, MAX_INTERESTS = 3, 6
+MAX_PAST_PROJECTS = 10
 
 _ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
@@ -144,6 +145,7 @@ class Persona:
     interests: list[Interest]
     behavior: Behavior
     created_at: datetime
+    past_projects: list[str] = field(default_factory=list)  # topics of finished projects, oldest first
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -168,6 +170,11 @@ class Persona:
 
         _require(isinstance(self.behavior, Behavior), "behavior: expected Behavior")
         _check_aware(self.created_at, "created_at")
+        _require(isinstance(self.past_projects, list), "past_projects: expected list")
+        _require(len(self.past_projects) <= MAX_PAST_PROJECTS,
+                 f"past_projects: at most {MAX_PAST_PROJECTS}, got {len(self.past_projects)}")
+        for topic in self.past_projects:
+            _check_text(topic, "past_projects item")
         _require(self.schema_version == SCHEMA_VERSION,
                  f"schema_version: expected {SCHEMA_VERSION}, got {self.schema_version!r}")
 
@@ -183,12 +190,14 @@ class Persona:
             "interests": [i.to_dict() for i in self.interests],
             "behavior": self.behavior.to_dict(),
             "created_at": self.created_at.isoformat(),
+            "past_projects": list(self.past_projects),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> Persona:
+        data = _migrate(data)
         _check_keys(data, {"schema_version", "id", "name", "age_group", "occupation", "city",
-                           "languages", "interests", "behavior", "created_at"}, "persona")
+                           "languages", "interests", "behavior", "created_at", "past_projects"}, "persona")
         interests = data.get("interests")
         _require(isinstance(interests, list), "interests: expected list")
         return cls(
@@ -201,5 +210,13 @@ class Persona:
             interests=[Interest.from_dict(i) for i in interests],
             behavior=Behavior.from_dict(data.get("behavior")),
             created_at=_parse_dt(data.get("created_at"), "created_at"),
+            past_projects=data.get("past_projects"),
             schema_version=data.get("schema_version"),
         )
+
+
+def _migrate(data: Any) -> Any:
+    """Upgrades personas saved by older versions; the file itself is rewritten on the next save."""
+    if isinstance(data, dict) and data.get("schema_version") == 1:
+        data = {**data, "schema_version": 2, "past_projects": []}
+    return data

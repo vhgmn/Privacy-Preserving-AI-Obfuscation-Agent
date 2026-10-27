@@ -41,7 +41,9 @@ service ever learns which traffic is fake.
    `data/personas/<id>.json`.
 
 Long-term interests persist; projects (e.g. "choosing a new fridge") expire after
-1–6 weeks, like in a real person's life.
+1–6 weeks, like in a real person's life. `refresh` replaces each finished project
+with a new one that fits the persona and remembers the last ten finished projects,
+so the new ones do not repeat them.
 
 ## Requirements
 
@@ -69,6 +71,9 @@ profiles would be uploaded.
 ```powershell
 # create personas up to the target (3); about a minute each on a CPU
 .venv\Scripts\python.exe -m agent.persona generate
+
+# replace projects whose time is over with new ones (run every few days)
+.venv\Scripts\python.exe -m agent.persona refresh
 
 .venv\Scripts\python.exe -m agent.persona list
 .venv\Scripts\python.exe -m agent.persona show <id>
