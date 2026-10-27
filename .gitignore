@@ -6,6 +6,7 @@ __pycache__/
 # Local-only data — never commit
 data/
 profiles/
+models/
 screenshots/
 *.png
 *.log

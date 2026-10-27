@@ -8,13 +8,14 @@ projects and habits, who will browse the web on their own schedule.
 All planning runs on a **local LLM** ([Ollama](https://ollama.com)), so no cloud
 service ever learns which traffic is fake.
 
-> **Status:** early development. The Persona Engine (phase 1) works; the browser
-> agent and scheduler are not built yet. See the [roadmap](#roadmap).
+> **Status:** early development. The Persona Engine (phase 1) and the Daily Planner
+> (phase 2) work; the browser agent and scheduler are not built yet. See the
+> [roadmap](#roadmap).
 
 ## Principles
 
 - **Local only.** Personas, plans and logs are generated and stored on your machine
-  and are never committed (`data/` and `profiles/` are in `.gitignore`).
+  and are never committed (`data/`, `profiles/` and `models/` are in `.gitignore`).
 - **Secure even when the code is public** (Kerckhoffs's principle). The repository
   contains no fixed personas, query lists or timing profiles; every install
   generates its own.
@@ -45,11 +46,53 @@ Long-term interests persist; projects (e.g. "choosing a new fridge") expire afte
 with a new one that fits the persona and remembers the last ten finished projects,
 so the new ones do not repeat them.
 
+## How the Daily Planner works
+
+Every day each persona gets 2–5 **sessions**. A session is one search journey on one
+topic: a first search, 1–3 follow-up searches that refine it, results to open and
+read, and sometimes a YouTube search. Topics are picked by weight; projects come up
+more often (at most twice a day), and now and then a finished project returns.
+Each session uses one of the persona's languages and its search style.
+
+The plan says *what* to do, not *when*: timing belongs to the scheduler (phase 4).
+Follow-up searches are marked replaceable, so the browser agent (phase 3) can swap
+them for ones based on what the real results showed.
+
+Every query is safety-checked and must be written in the session's language: an
+Armenian query with Cyrillic or stray foreign letters is rejected.
+
+## Armenian queries
+
+The small LLM writes good English and Russian but cannot write Armenian (it invents
+words), so Armenian queries are written in English and translated locally with
+Meta's [NLLB-200](https://huggingface.co/facebook/nllb-200-distilled-600M)
+(distilled 600M, converted to CTranslate2 int8, ~600 MB, about 2 s per batch on a CPU).
+Without the model, Armenian sessions are replaced by Russian or English ones and a
+warning is shown.
+
+The model is converted on your machine from Meta's official repository (rather than
+downloading a third-party conversion). It needs about 5 GB temporarily; use a short
+folder path, since pip fails on Windows paths near 260 characters:
+
+```powershell
+py -3.12 -m venv C:\nllb_tmp\venv
+C:\nllb_tmp\venv\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+C:\nllb_tmp\venv\Scripts\python.exe -m pip install transformers ctranslate2 sentencepiece protobuf
+$env:HF_HOME = "C:\nllb_tmp\hf-cache"
+C:\nllb_tmp\venv\Scripts\ct2-transformers-converter.exe --model facebook/nllb-200-distilled-600M `
+    --quantization int8 --copy_files sentencepiece.bpe.model --output_dir models\nllb-600m-int8
+Remove-Item -Recurse -Force C:\nllb_tmp
+```
+
+Note: the NLLB weights are licensed **CC-BY-NC-4.0** (non-commercial use only); they
+are not part of this repository, whose code is MIT.
+
 ## Requirements
 
 - Windows 10/11 (other platforms untested)
 - Python 3.12
 - [Ollama](https://ollama.com) with the model pulled: `ollama pull qwen2.5:3b`
+- Optional, for Armenian queries: the NLLB model (see [Armenian queries](#armenian-queries))
 - Google Chrome (used by the future browser agent)
 
 Keep Ollama on local models only; do not enable network exposure.
@@ -78,11 +121,16 @@ profiles would be uploaded.
 .venv\Scripts\python.exe -m agent.persona list
 .venv\Scripts\python.exe -m agent.persona show <id>
 .venv\Scripts\python.exe -m agent.persona delete <id>
+
+# plan today's sessions for every persona (a few minutes on a CPU)
+.venv\Scripts\python.exe -m agent.planner today
+.venv\Scripts\python.exe -m agent.planner show <persona-id> [--date YYYY-MM-DD]
 ```
 
 ## Tests
 
-The tests use a fake LLM, so they run in under a second and need no Ollama:
+The tests use a fake LLM and a fake translator, so they run in under a second and
+need neither Ollama nor the NLLB model:
 
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -v
@@ -93,12 +141,18 @@ The tests use a fake LLM, so they run in under a second and need no Ollama:
 ```
 agent/
   llm.py              Ollama client
+  translate.py        local English → Armenian translation (NLLB, CTranslate2)
   config.py           paths, persona count, cities, interest areas, excluded topics
   persona/
     schema.py         Persona / Interest / Behavior with strict validation
     generator.py      staged LLM generation with safety checks and retries
     store.py          atomic JSON storage in data/personas/
     names.py          Armenian first names
+    __main__.py       command line
+  planner/
+    schema.py         DailyPlan / Session / Step, step order and language checks
+    planner.py        topic, language and query choice for each session
+    store.py          atomic JSON storage in data/plans/<date>/
     __main__.py       command line
 tests/                unit tests
 ```
@@ -107,7 +161,7 @@ tests/                unit tests
 
 0. ✅ Setup: local LLM, dependencies, real Chrome via Playwright
 1. ✅ **Persona Engine**
-2. Daily Planner: search journeys (query → click → read → follow-up) per persona
+2. ✅ **Daily Planner**: search journeys (query → click → read → follow-up) per persona
 3. Browser Agent: human-like typing, scrolling and reading time; one Chrome profile per persona
 4. Scheduler: bursty, log-normal sessions within the user's waking hours; Windows idle detection
 5. Evaluation: an LLM "tracker's eye view" and a real-vs-decoy classifier

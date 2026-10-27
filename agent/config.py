@@ -4,6 +4,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 PERSONAS_DIR = DATA_DIR / "personas"
 PROFILES_DIR = REPO_ROOT / "profiles"
+MODELS_DIR = REPO_ROOT / "models"
+NLLB_DIR = MODELS_DIR / "nllb-600m-int8"  # converted locally from facebook/nllb-200-distilled-600M
 
 PERSONA_COUNT = 3
 
