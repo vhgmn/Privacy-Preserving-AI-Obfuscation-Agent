@@ -12,11 +12,13 @@ from playwright.sync_api import BrowserContext
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from agent import config
+from agent import config, proxy
 from agent.browser import human, sites
 from agent.browser.thirdparty import ThirdParties
 from agent.persona.schema import Persona
 from agent.planner.schema import Session
+
+SLOW_NETWORK_FACTOR = 3.0  # timeouts through a proxy such as the Nym mixnet
 
 CHROME_ARGS = [
     "--disable-blink-features=AutomationControlled",  # otherwise navigator.webdriver is true
@@ -99,8 +101,13 @@ def persona_browser(persona: Persona, on_own_desktop: bool = False, echo=print) 
         before = desktop.chrome_windows()
     profile_dir = config.PROFILES_DIR / persona.id
     match_user_languages(profile_dir, _user_languages())
+    proxy_url = proxy.required(persona.id)  # raises ProxyDown rather than going online without it
+    extra = {"proxy": {"server": proxy_url}} if proxy_url else {}
+    if proxy_url:
+        echo(f"  through {proxy_url}")
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
+            **extra,
             user_data_dir=str(profile_dir),
             channel="chrome",
             headless=False,
@@ -158,6 +165,8 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
     """
     rng = rng or random.SystemRandom()
     page = context.pages[0] if context.pages else context.new_page()
+    slow = proxy.for_persona(persona.id) is not None
+    sites.SLOW_FACTOR = SLOW_NETWORK_FACTOR if slow else 1.0
     log.write("session_start", topic=session.topic, language=session.language,
               webdriver=page.evaluate("navigator.webdriver"))
     third_parties = ThirdParties()
@@ -171,14 +180,15 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
 
     context.on("request", on_request)
     try:
-        return _run_steps(page, persona, session, log, rng, echo, browse)
+        return _run_steps(page, persona, session, log, rng, echo, browse, slow)
     finally:
+        sites.SLOW_FACTOR = 1.0
         context.remove_listener("request", on_request)
         log.write("third_parties", domains=third_parties.summary())
 
 
 def _run_steps(page, persona: Persona, session: Session, log: SessionLog, rng: random.Random, echo,
-               browse: bool) -> str:
+               browse: bool, slow: bool) -> str:
     mouse = sites.Mouse(page, rng)
     behavior = persona.behavior
     skip_to_next_search = False
@@ -212,6 +222,8 @@ def _run_steps(page, persona: Persona, session: Session, log: SessionLog, rng: r
                         _browse_site(page, mouse, persona, visited, log, rng, echo)
                     if results_url:
                         sites.back_to_results(page, results_url)
+                elif step.type == "youtube" and slow:
+                    log.write("youtube_skipped", reason="video is too slow through a mixnet")
                 elif step.type == "youtube":
                     echo(f"  youtube: {step.query}")
                     url, seconds = sites.youtube(page, mouse, step.query, behavior.typo_rate,

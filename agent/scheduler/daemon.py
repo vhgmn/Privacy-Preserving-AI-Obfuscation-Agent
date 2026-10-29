@@ -9,6 +9,7 @@ from typing import Callable
 import httpx
 from playwright.sync_api import Error as PlaywrightError
 
+from agent import proxy
 from agent.browser.runner import SessionLog, persona_browser, run_session
 from agent.persona import favorites
 from agent.persona import store as persona_store
@@ -42,6 +43,7 @@ class Daemon:
         self.notify_fn = notify_fn
         self.rhythm = Rhythm.load()
         self._prepare_retry_at: datetime | None = None
+        self._proxy_warned: date | None = None
 
     # --- one minute of the loop ---
 
@@ -167,6 +169,14 @@ class Daemon:
         try:
             with persona_browser(persona, on_own_desktop=True, echo=self.echo) as context:
                 return run_session(context, persona, session, log, echo=self.echo, browse=mode != "short")
+        except proxy.ProxyDown as exc:
+            self.echo(f"  not run: {exc}")
+            log.write("proxy_down", error=str(exc))
+            if self._proxy_warned != self.clock().date():
+                self._proxy_warned = self.clock().date()
+                self.notify_fn("Decoy agent: proxy not answering",
+                               f"{persona.name}'s sessions are skipped until its proxy (e.g. the Nym client) runs.")
+            return "failed"
         except PlaywrightError as exc:
             message = str(exc).splitlines()[0][:200]
             self.echo(f"  could not run: {message}")

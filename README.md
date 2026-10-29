@@ -207,6 +207,13 @@ the third parties that saw it on two or more sites (they can follow it from site
 site) and those that saw several personas: since all profiles share one device
 fingerprint and one IP address, such a tracker can tell they are one device.
 
+## Optional: decoys through the Nym mixnet
+
+Each persona, or all of them, can go online through a SOCKS5 proxy such as a local
+[Nym](https://nym.com) client, so they no longer share the user's IP address. A persona
+with a proxy never goes online without it (fail-closed). Which setup hides what, and
+how to set up the Nym side, is in [docs/NYM.md](docs/NYM.md).
+
 ## Armenian queries
 
 The small LLM writes good English and Russian but cannot write Armenian (it invents
@@ -290,6 +297,10 @@ profiles would be uploaded.
 # which third parties saw each persona, on how many sites
 .venv\Scripts\python.exe -m agent.evaluation trackers [--days 7]
 
+# optional: send a persona (or 'default': all) through a SOCKS5 proxy such as Nym, see docs/NYM.md
+.venv\Scripts\python.exe -m agent.proxy set <persona-id|default> socks5://127.0.0.1:1080
+.venv\Scripts\python.exe -m agent.proxy status
+
 # let the agent run on its own schedule (leave the terminal open; Ctrl+C stops)
 .venv\Scripts\python.exe -m agent.scheduler run
 .venv\Scripts\python.exe -m agent.scheduler status
@@ -312,6 +323,7 @@ agent/
   llm.py              Ollama client
   translate.py        local English → Armenian translation (NLLB, CTranslate2)
   config.py           paths, persona count, cities, interest areas, excluded topics
+  proxy.py            optional SOCKS5 proxy per persona (data/proxies.json), fail-closed
   persona/
     schema.py         Persona / Interest / Behavior with strict validation
     generator.py      staged LLM generation with safety checks and retries
@@ -358,7 +370,8 @@ tests/                unit tests
    own virtual desktop. Next: start automatically at logon
 5. ✅ **Evaluation**: fingerprint audit, LLM "tracker's eye view", real-vs-decoy classifier, third
    parties per persona. Next: results over a week of running; longer, multi-topic sessions
-6. Optional routing of decoy traffic through the Nym mixnet
+6. ✅ Optional routing of decoy traffic through the Nym mixnet: one proxy for all personas or
+   one per persona ([docs/NYM.md](docs/NYM.md)); not yet tried with a live Nym client
 7. Threat model and ethics documentation
 
 ## License

@@ -13,6 +13,12 @@ from agent.browser import human
 DDG_HOME = "https://duckduckgo.com/"
 YOUTUBE_HOME = "https://www.youtube.com/"
 LOAD_TIMEOUT_MS = 20_000
+# A mixnet adds seconds to every request; set by the runner while a persona uses a proxy.
+SLOW_FACTOR = 1.0
+
+
+def _ms() -> float:
+    return LOAD_TIMEOUT_MS * SLOW_FACTOR
 # DuckDuckGo: a textarea on the home page, an input on result pages.
 DDG_SEARCH_BOX = 'textarea[name="q"]:visible, input[name="q"]:visible'
 DDG_RESULT_LINK = 'article[data-testid="result"] a[data-testid="result-title-a"]'
@@ -61,7 +67,7 @@ class Mouse:
         self.x, self.y = target
 
     def click(self, locator: Locator) -> None:
-        locator.scroll_into_view_if_needed(timeout=LOAD_TIMEOUT_MS)
+        locator.scroll_into_view_if_needed(timeout=_ms())
         self.move_to(locator)
         time.sleep(self.rng.uniform(0.08, 0.35))
         self.page.mouse.click(self.x, self.y)
@@ -82,7 +88,7 @@ def check_not_blocked(page: Page) -> None:
 def wait_until(page: Page, ready, what: str, timeout_s: float = LOAD_TIMEOUT_MS / 1000) -> None:
     """Polls `ready()` from Python. Bot checks often appear a moment after the page loads,
     so they are looked for on every poll; on timeout the error says what the page showed."""
-    deadline = time.monotonic() + timeout_s
+    deadline = time.monotonic() + timeout_s * SLOW_FACTOR
     while time.monotonic() < deadline:
         try:
             if ready():
@@ -123,7 +129,7 @@ def type_like_human(page: Page, text: str, typo_rate: float, rng: random.Random)
 def _search(page: Page, mouse: Mouse, box_selector: str, home: str, query: str,
             typo_rate: float, rng: random.Random) -> None:
     if not page.url.startswith(home):
-        page.goto(home, wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+        page.goto(home, wait_until="domcontentloaded", timeout=_ms())
         check_not_blocked(page)
         dismiss_cookie_banner(page, mouse)
     box = page.locator(box_selector).first
@@ -134,7 +140,7 @@ def _search(page: Page, mouse: Mouse, box_selector: str, home: str, query: str,
     type_like_human(page, query, typo_rate, rng)
     time.sleep(rng.uniform(0.3, 1.2))
     page.keyboard.press("Enter")
-    page.wait_for_load_state("domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    page.wait_for_load_state("domcontentloaded", timeout=_ms())
     check_not_blocked(page)
 
 
@@ -178,7 +184,7 @@ def open_result(page: Page, mouse: Mouse, rank: int, visited: set[str]) -> str:
             if attempt == 2:
                 raise
             page.keyboard.press("Escape")
-    page.wait_for_load_state("domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    page.wait_for_load_state("domcontentloaded", timeout=_ms())
     visited.update({hrefs[index], page.url})  # both: the link may redirect
     check_not_blocked(page)
     dismiss_cookie_banner(page, mouse)
@@ -207,7 +213,7 @@ def _scroll_for(page: Page, seconds: float, rng: random.Random) -> None:
 
 def visit(page: Page, mouse: Mouse, url: str, visited: set[str]) -> str:
     """Goes straight to a favourite site, as from a bookmark or the address bar."""
-    page.goto(url, wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    page.goto(url, wait_until="domcontentloaded", timeout=_ms())
     check_not_blocked(page)
     dismiss_cookie_banner(page, mouse)
     visited.update({url, page.url})
@@ -233,7 +239,7 @@ def follow_internal_link(page: Page, mouse: Mouse, visited: set[str], rng: rando
             visited.add(href)  # not this one again
             if attempt == 2:
                 raise PlaywrightError(f"{str(exc).splitlines()[0][:120]} (link {href[:120]})") from None
-    page.wait_for_load_state("domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    page.wait_for_load_state("domcontentloaded", timeout=_ms())
     visited.update({href, page.url})
     check_not_blocked(page)
     dismiss_cookie_banner(page, mouse)
@@ -245,9 +251,9 @@ def back_to_results(page: Page, results_url: str | None = None) -> None:
     for _ in range(human.MAX_BROWSE_DEPTH + 2):
         if urlparse(page.url).netloc.endswith("duckduckgo.com"):
             return
-        page.go_back(wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+        page.go_back(wait_until="domcontentloaded", timeout=_ms())
     if results_url and not urlparse(page.url).netloc.endswith("duckduckgo.com"):
-        page.goto(results_url, wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+        page.goto(results_url, wait_until="domcontentloaded", timeout=_ms())
 
 
 def youtube(page: Page, mouse: Mouse, query: str, typo_rate: float, youtube_affinity: float,
@@ -265,7 +271,7 @@ def youtube(page: Page, mouse: Mouse, query: str, typo_rate: float, youtube_affi
     wait_until(page, videos_listed, "video results")
     href = found[0]
     mouse.click(page.locator(f'a[href="{href}"]').first)
-    page.wait_for_load_state("domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    page.wait_for_load_state("domcontentloaded", timeout=_ms())
     check_not_blocked(page)
     seconds = human.watch_seconds(youtube_affinity, rng)
     _scroll_for(page, seconds, rng)

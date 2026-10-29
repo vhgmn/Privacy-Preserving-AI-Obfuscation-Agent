@@ -6,6 +6,7 @@ from datetime import date
 from agent.browser.runner import SessionLog, persona_browser, run_session, webdriver_flag
 from agent.persona import store as persona_store
 from agent.planner import store as plan_store
+from agent.proxy import ProxyDown
 
 
 def cmd_check(args) -> int:
@@ -47,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, ProxyDown) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

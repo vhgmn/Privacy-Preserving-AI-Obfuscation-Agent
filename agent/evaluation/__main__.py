@@ -12,6 +12,7 @@ from playwright.sync_api import Error as PlaywrightError
 from agent.browser.runner import persona_browser
 from agent.evaluation import classifier, fingerprint, tracker_view, trackers
 from agent.persona import store as persona_store
+from agent.proxy import ProxyDown
 from agent.scheduler.state import DayState
 
 MINE = "mine"  # label of the user's own Chrome
@@ -56,7 +57,7 @@ def cmd_fingerprint(args) -> int:
             try:
                 with persona_browser(persona) as context:
                     fp = fingerprint.collect(context)
-            except PlaywrightError as exc:
+            except (PlaywrightError, ProxyDown) as exc:
                 print(f"  failed: {str(exc).splitlines()[0][:200]}")
                 continue
             print(f"  saved {fingerprint.save(persona.id, fp, today)}")
