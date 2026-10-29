@@ -174,6 +174,39 @@ The first test run, on a day of logs, already found two weaknesses that are now
 fixed: most reads ended at exactly the same 240 s limit, and "healthy" or "diet"
 recipe searches passed the safety check although a tracker files them under health.
 
+## Evaluation: real vs. decoy, as the network sees it
+
+An internet provider or Wi-Fi owner sees which domains are visited and when, from every
+profile alike. `python -m agent.evaluation classifier` asks whether such an observer
+could tell the user's browsing sessions from the decoys. The user's side is read from
+their own Chrome history, **only the time and domain of each visit**, from a temporary
+copy that is deleted at once; nothing about it is written to disk, only the aggregate
+result (`data/eval/classifier/<date>.json`).
+
+Visits are cut into sessions at pauses of 30 minutes. Each session is described by its
+hour, weekday, length, pages, domains, pauses between pages, share of searches and of
+YouTube, and how many of its domains the same source had not visited before. A logistic
+regression and a random forest are scored by cross-validated **AUC** (0.5: the
+observer cannot tell them apart; 1.0: always can), and the forest names the features
+that give the decoys away.
+
+First result (7 days, 32 sessions of the user, 8 decoy sessions): **AUC 0.91–0.97**,
+so decoys were easy to spot. They were short (8 vs. 95 minutes), had few pages (7 vs.
+74), mostly searches (51% vs. 27%) and mostly new sites (67% vs. 27%). This led to
+reading on inside sites and to favourite sites (see above). Two cautions: eight decoy
+sessions are few, and a real provider merges all traffic of one address, so decoys
+that run while the user is active blend into the user's own sessions; the test is
+deliberately strict.
+
+## Evaluation: which trackers see the personas
+
+During every session the agent notes which other companies' domains each page made
+Chrome contact (only the domain and the site it was loaded on), e.g. an analytics
+script on a news site. `python -m agent.evaluation trackers` then lists, per persona,
+the third parties that saw it on two or more sites (they can follow it from site to
+site) and those that saw several personas: since all profiles share one device
+fingerprint and one IP address, such a tracker can tell they are one device.
+
 ## Armenian queries
 
 The small LLM writes good English and Russian but cannot write Armenian (it invents
@@ -251,6 +284,12 @@ profiles would be uploaded.
 # tracker's eye view of every persona's last 7 days of logs (a few minutes per persona)
 .venv\Scripts\python.exe -m agent.evaluation tracker [<persona-id>] [--days 7]
 
+# can a network observer tell your sessions from the decoys? (reads only time and domain of your visits)
+.venv\Scripts\python.exe -m agent.evaluation classifier [--days 7]
+
+# which third parties saw each persona, on how many sites
+.venv\Scripts\python.exe -m agent.evaluation trackers [--days 7]
+
 # let the agent run on its own schedule (leave the terminal open; Ctrl+C stops)
 .venv\Scripts\python.exe -m agent.scheduler run
 .venv\Scripts\python.exe -m agent.scheduler status
@@ -289,6 +328,7 @@ agent/
     human.py          typing, typos, mouse paths, scrolling, reading and watching times
     sites.py          DuckDuckGo, result pages and YouTube; bot-check and cookie-banner handling
     runner.py         persona's Chrome profile, runs a session, writes the log
+    thirdparty.py     which third-party domains each page contacted (domains only)
     __main__.py       command line
   scheduler/
     timing.py         when to run: waking hours, active vs. away, log-normal pauses
@@ -301,6 +341,8 @@ agent/
   evaluation/
     fingerprint.py    local fingerprint probe, the one-time 127.0.0.1 page, comparison report
     tracker_view.py   the LLM as tracker and judge, automation signals measured by code
+    classifier.py     real-vs-decoy sessions from Chrome history (time + domain) and decoy logs
+    trackers.py       third parties that saw each persona, and those shared between personas
     __main__.py       command line
 tests/                unit tests
 ```
@@ -314,8 +356,8 @@ tests/                unit tests
    Next: follow-up searches based on the real results
 4. ✅ **Scheduler**: bursty, log-normal sessions within the user's waking hours; Windows idle detection;
    own virtual desktop. Next: start automatically at logon
-5. Evaluation: ✅ fingerprint audit (persona profiles vs. the user's Chrome); ✅ LLM "tracker's eye
-   view"; next: a real-vs-decoy classifier, and which tracker domains see each persona
+5. ✅ **Evaluation**: fingerprint audit, LLM "tracker's eye view", real-vs-decoy classifier, third
+   parties per persona. Next: results over a week of running; longer, multi-topic sessions
 6. Optional routing of decoy traffic through the Nym mixnet
 7. Threat model and ethics documentation
 

@@ -1,4 +1,4 @@
-"""Command line for evaluation: python -m agent.evaluation {fingerprint,fingerprint-report,tracker,classifier}"""
+"""Command line for evaluation: python -m agent.evaluation {fingerprint,fingerprint-report,tracker,classifier,trackers}"""
 import argparse
 import sqlite3
 import sys
@@ -10,7 +10,7 @@ import httpx
 from playwright.sync_api import Error as PlaywrightError
 
 from agent.browser.runner import persona_browser
-from agent.evaluation import classifier, fingerprint, tracker_view
+from agent.evaluation import classifier, fingerprint, tracker_view, trackers
 from agent.persona import store as persona_store
 from agent.scheduler.state import DayState
 
@@ -121,6 +121,16 @@ def cmd_classifier(args) -> int:
     return 0
 
 
+def cmd_trackers(args) -> int:
+    end = date.fromisoformat(args.date) if args.date else date.today()
+    personas = persona_store.list_all()
+    report = trackers.build({p.id: tracker_view.load_events(p.id, end, args.days) for p in personas},
+                            end.isoformat(), args.days)
+    print(trackers.format_report(report, {p.id: p.name for p in personas}))
+    print(f"Saved the summary to {trackers.save(report)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agent.evaluation", description="Measure how well decoys hide.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -140,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
     clf.add_argument("--days", type=int, default=7, help="how many days, default 7")
     clf.add_argument("--date", help="last day YYYY-MM-DD, default today")
     clf.set_defaults(func=cmd_classifier)
+    trk = sub.add_parser("trackers", help="which third parties saw each persona, and on how many sites")
+    trk.add_argument("--days", type=int, default=7, help="how many days of logs, default 7")
+    trk.add_argument("--date", help="last day YYYY-MM-DD, default today")
+    trk.set_defaults(func=cmd_trackers)
     args = parser.parse_args(argv)
     return args.func(args)
 

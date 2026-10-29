@@ -14,6 +14,7 @@ from playwright.sync_api import sync_playwright
 
 from agent import config
 from agent.browser import human, sites
+from agent.browser.thirdparty import ThirdParties
 from agent.persona.schema import Persona
 from agent.planner.schema import Session
 
@@ -157,10 +158,29 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
     """
     rng = rng or random.SystemRandom()
     page = context.pages[0] if context.pages else context.new_page()
-    mouse = sites.Mouse(page, rng)
-    behavior = persona.behavior
     log.write("session_start", topic=session.topic, language=session.language,
               webdriver=page.evaluate("navigator.webdriver"))
+    third_parties = ThirdParties()
+
+    def on_request(request) -> None:
+        try:
+            page_load = request.is_navigation_request() and request.frame == page.main_frame
+        except PlaywrightError:  # e.g. a service worker's request has no frame
+            page_load = False
+        third_parties.record(request.url, page_load)
+
+    context.on("request", on_request)
+    try:
+        return _run_steps(page, persona, session, log, rng, echo, browse)
+    finally:
+        context.remove_listener("request", on_request)
+        log.write("third_parties", domains=third_parties.summary())
+
+
+def _run_steps(page, persona: Persona, session: Session, log: SessionLog, rng: random.Random, echo,
+               browse: bool) -> str:
+    mouse = sites.Mouse(page, rng)
+    behavior = persona.behavior
     skip_to_next_search = False
     failures = 0
     visited: set[str] = set()  # a person does not reread the page they just read
