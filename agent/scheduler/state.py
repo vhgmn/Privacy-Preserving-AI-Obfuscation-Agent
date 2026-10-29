@@ -21,7 +21,7 @@ class DayState:
     paused_personas: list[str] = field(default_factory=list)  # hit a bot check today
     search_paused_until: datetime | None = None
     next_due: datetime | None = None
-    running: str | None = None  # who has Chrome right now (a session or the fingerprint audit)
+    running: str | None = None  # who has Chrome or the local LLM right now (a session, the day's planning, an evaluation)
     running_since: datetime | None = None
 
     def start(self, who: str, now: datetime) -> None:
@@ -31,7 +31,8 @@ class DayState:
         self.running = self.running_since = None
 
     def busy(self, now: datetime) -> str | None:
-        """Who is using Chrome, or None. Only one Chrome runs at a time; profiles cannot be opened twice."""
+        """Who is busy, or None. One Chrome at a time (profiles cannot be opened twice), and one user
+        of the local LLM at a time (Ollama hung when the planner and an evaluation shared it)."""
         if self.running and self.running_since and now - self.running_since < RUNNING_STALE_AFTER:
             return self.running
         return None

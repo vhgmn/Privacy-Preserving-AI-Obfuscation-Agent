@@ -27,14 +27,11 @@ def cmd_next(args) -> int:
     daemon = Daemon(echo=_print)
     now = datetime.now()
     state = DayState.load(now.date())
-    if not state.prepared:
-        if not daemon.prepare_fn(now.date()):
-            return 1
-        state.prepared = True
-        state.save()
     busy = state.busy(now)
     if busy:
-        print(f"Chrome is in use ({busy}); try again later.")
+        print(f"The agent is busy ({busy}); try again later.")
+        return 1
+    if not state.prepared and not daemon.prepare_today(state, now):
         return 1
     pending = daemon.pending(state, now)
     if not pending:
@@ -67,7 +64,7 @@ def cmd_status(args) -> int:
           f" ({'learned' if learned else f'default until {MIN_DAYS_TO_LEARN} days are recorded; {past_days} so far'})")
     print(f"Prepared today: {state.prepared}; next session due: {state.next_due or 'when active'}")
     if state.busy(now):
-        print(f"Chrome in use: {state.running} since {state.running_since:%H:%M}")
+        print(f"Busy: {state.running} since {state.running_since:%H:%M}")
     if state.search_paused_until:
         print(f"Searches paused until {state.search_paused_until:%H:%M} (bot check)")
     names = {p.id: p.name for p in persona_store.list_all()}

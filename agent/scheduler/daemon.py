@@ -53,16 +53,14 @@ class Daemon:
         if now.hour not in waking:
             return
         state = DayState.load(now.date())
+        if state.busy(now):
+            return  # e.g. the fingerprint audit has Chrome, or an evaluation is using the LLM
         if not state.prepared:
             if self._prepare_retry_at and now < self._prepare_retry_at:
                 return
-            if not self.prepare_fn(now.date()):
+            if not self.prepare_today(state, now):
                 self._prepare_retry_at = now + PREPARE_RETRY
                 return
-            state.prepared = True
-            state.save()
-        if state.busy(now):
-            return  # e.g. the fingerprint audit has Chrome
 
         pending = self.pending(state, now)
         if not pending:
@@ -98,6 +96,20 @@ class Daemon:
                            f"no searches for {SEARCH_PAUSE.seconds // 3600} hours.")
         state.next_due = end + next_gap(self.rng, len(pending) - 1, remaining_waking_minutes(end, waking))
         state.save()
+
+    def prepare_today(self, state: DayState, now: datetime) -> bool:
+        """Runs the preparation marked as busy: it uses the local LLM, which must not be shared."""
+        state.start("preparing the day", now)
+        state.save()
+        try:
+            ok = self.prepare_fn(now.date())
+        finally:
+            state.finish()
+            state.save()
+        if ok:
+            state.prepared = True
+            state.save()
+        return ok
 
     def pending(self, state: DayState, now: datetime) -> list[Pending]:
         if state.search_paused_until and now < state.search_paused_until:

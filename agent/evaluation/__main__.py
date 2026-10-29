@@ -1,17 +1,40 @@
-"""Command line for evaluation: python -m agent.evaluation {fingerprint,fingerprint-report,tracker}"""
+"""Command line for evaluation: python -m agent.evaluation {fingerprint,fingerprint-report,tracker,classifier}"""
 import argparse
+import sqlite3
 import sys
-from datetime import date, datetime
+from contextlib import contextmanager
+from datetime import date, datetime, time, timedelta
+from typing import Iterator
 
 import httpx
 from playwright.sync_api import Error as PlaywrightError
 
 from agent.browser.runner import persona_browser
-from agent.evaluation import fingerprint, tracker_view
+from agent.evaluation import classifier, fingerprint, tracker_view
 from agent.persona import store as persona_store
 from agent.scheduler.state import DayState
 
 MINE = "mine"  # label of the user's own Chrome
+
+
+@contextmanager
+def agent_busy(who: str) -> Iterator[bool]:
+    """Marks the agent busy (see DayState.busy) for the block; yields False if someone else already is."""
+    today = date.today()
+    state = DayState.load(today)
+    busy = state.busy(datetime.now())
+    if busy:
+        print(f"The agent is busy ({busy}); try again after that.")
+        yield False
+        return
+    state.start(who, datetime.now())
+    state.save()
+    try:
+        yield True
+    finally:
+        state = DayState.load(today)  # the daemon may have saved in the meantime
+        state.finish()
+        state.save()
 
 
 def cmd_fingerprint(args) -> int:
@@ -25,14 +48,9 @@ def cmd_fingerprint(args) -> int:
         print(f"Saved {fingerprint.save(MINE, fp, today)}")
         return 0
 
-    state = DayState.load(today)
-    busy = state.busy(datetime.now())
-    if busy:
-        print(f"Chrome is in use ({busy}); try again after that session.")
-        return 1
-    state.start("fingerprint audit", datetime.now())
-    state.save()
-    try:
+    with agent_busy("fingerprint audit") as free:
+        if not free:
+            return 1
         for persona in persona_store.list_all():
             print(f"{persona.name}...", flush=True)
             try:
@@ -42,10 +60,6 @@ def cmd_fingerprint(args) -> int:
                 print(f"  failed: {str(exc).splitlines()[0][:200]}")
                 continue
             print(f"  saved {fingerprint.save(persona.id, fp, today)}")
-    finally:
-        state = DayState.load(today)  # the daemon may have saved in the meantime
-        state.finish()
-        state.save()
     return 0
 
 
@@ -64,14 +78,19 @@ def cmd_report(args) -> int:
 def cmd_tracker(args) -> int:
     end = date.fromisoformat(args.date) if args.date else date.today()
     personas = [persona_store.load(args.persona_id)] if args.persona_id else persona_store.list_all()
+    with agent_busy("tracker evaluation") as free:
+        return _run_tracker(personas, end, args.days) if free else 1
+
+
+def _run_tracker(personas, end: date, days: int) -> int:
     for persona in personas:
-        events = tracker_view.load_events(persona.id, end, args.days)
+        events = tracker_view.load_events(persona.id, end, days)
         if not events:
-            print(f"{persona.name}: no logs in the last {args.days} day(s)")
+            print(f"{persona.name}: no logs in the last {days} day(s)")
             continue
         print(f"{persona.name}: asking the local LLM (a minute or two)...", flush=True)
         try:
-            result = tracker_view.evaluate(persona, events, end, args.days)
+            result = tracker_view.evaluate(persona, events, end, days)
         except httpx.HTTPError as exc:
             print(f"error: cannot reach Ollama ({exc})", file=sys.stderr)
             return 1
@@ -80,6 +99,25 @@ def cmd_tracker(args) -> int:
             continue
         print(tracker_view.format_report(result, persona))
         print(f"  saved {tracker_view.save(result)}\n")
+    return 0
+
+
+def cmd_classifier(args) -> int:
+    end = date.fromisoformat(args.date) if args.date else date.today()
+    start = datetime.combine(end - timedelta(days=args.days - 1), time.min).astimezone()
+    stop = datetime.combine(end + timedelta(days=1), time.min).astimezone()
+    decoy = []
+    for persona in persona_store.list_all():
+        decoy += classifier.sessions(classifier.decoy_visits(tracker_view.load_events(persona.id, end, args.days)))
+    try:
+        real = classifier.sessions(classifier.read_history(start, stop))
+    except (OSError, sqlite3.Error) as exc:
+        print(f"error: cannot read your Chrome history ({exc})", file=sys.stderr)
+        return 1
+    print("Read the time and domain of your visits (nothing of it is saved); training...", flush=True)
+    result = classifier.evaluate(classifier.features(real), classifier.features(decoy), end, args.days)
+    print(classifier.format_report(result))
+    print(f"Saved the summary to {classifier.save(result)}")
     return 0
 
 
@@ -98,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
     tracker.add_argument("--days", type=int, default=7, help="how many days of logs, default 7")
     tracker.add_argument("--date", help="last day YYYY-MM-DD, default today")
     tracker.set_defaults(func=cmd_tracker)
+    clf = sub.add_parser("classifier", help="can a network observer tell your browsing sessions from the decoys?")
+    clf.add_argument("--days", type=int, default=7, help="how many days, default 7")
+    clf.add_argument("--date", help="last day YYYY-MM-DD, default today")
+    clf.set_defaults(func=cmd_classifier)
     args = parser.parse_args(argv)
     return args.func(args)
 

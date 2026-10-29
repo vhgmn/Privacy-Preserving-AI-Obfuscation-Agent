@@ -189,6 +189,30 @@ class DaemonTest(unittest.TestCase):
         daemon.tick()
         self.assertEqual(len(self.runs), 2)
 
+    def test_preparation_is_marked_busy_and_waits_for_others(self):
+        seen = []
+        daemon = self.daemon()
+        daemon.prepare_fn = lambda day: seen.append(DayState.load(day).busy(self.now)) or True
+        state = DayState(DAY)
+        state.start("tracker evaluation", self.now)
+        state.save()
+        daemon.tick()
+        self.assertEqual((seen, self.runs), ([], []))  # the evaluation has the LLM
+        state.finish()
+        state.save()
+        daemon.tick()
+        self.assertEqual(seen, ["preparing the day"])
+        self.assertTrue(DayState.load(DAY).prepared)
+        self.assertIsNone(DayState.load(DAY).busy(self.now))
+
+    def test_failed_preparation_clears_the_mark(self):
+        daemon = self.daemon()
+        daemon.prepare_fn = lambda day: False
+        daemon.tick()
+        state = DayState.load(DAY)
+        self.assertFalse(state.prepared)
+        self.assertIsNone(state.busy(self.now))
+
     def test_nothing_at_night(self):
         self.now = datetime(2026, 1, 15, 3, 0)
         self.daemon().tick()
