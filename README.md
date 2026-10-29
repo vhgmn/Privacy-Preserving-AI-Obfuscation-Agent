@@ -73,7 +73,8 @@ builds up its own cookies and history.
 - **The mouse** moves along curved paths to what it clicks; **scrolling** comes in
   irregular bursts, now and then back up.
 - **Reading time** follows the page length, the persona's reading speed and patience
-  (20 s to 4 min). A page already read in the session is not opened again.
+  (15 s to 5 min, with no fixed limit that many reads would end at). A page already
+  read in the session is not opened again.
 - **YouTube** videos are watched for 30 s to 3 min; Chrome runs muted.
 - Chrome starts without the automation flag, so `navigator.webdriver` is `false`
   (check with `python -m agent.browser check <persona-id>`). No other "stealth"

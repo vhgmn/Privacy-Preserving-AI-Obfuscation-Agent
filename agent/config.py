@@ -64,7 +64,7 @@ PROJECT_CATEGORIES = (
 # Trackers attribute decoy searches to the real user, so decoys must never touch
 # topics that could harm them (insurance, credit, ad profiling, etc.).
 EXCLUDED_TOPICS = (
-    "health, illness, medication or mental health",
+    "health, illness, medication or mental health, including diets, weight loss, healthy eating and nutrition",
     "sexual content or dating",
     "political extremism or activism",
     "illegal activity or weapons",

@@ -1,12 +1,13 @@
-"""Command line for evaluation: python -m agent.evaluation {fingerprint,fingerprint-report}"""
+"""Command line for evaluation: python -m agent.evaluation {fingerprint,fingerprint-report,tracker}"""
 import argparse
 import sys
 from datetime import date, datetime
 
+import httpx
 from playwright.sync_api import Error as PlaywrightError
 
 from agent.browser.runner import persona_browser
-from agent.evaluation import fingerprint
+from agent.evaluation import fingerprint, tracker_view
 from agent.persona import store as persona_store
 from agent.scheduler.state import DayState
 
@@ -60,6 +61,28 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_tracker(args) -> int:
+    end = date.fromisoformat(args.date) if args.date else date.today()
+    personas = [persona_store.load(args.persona_id)] if args.persona_id else persona_store.list_all()
+    for persona in personas:
+        events = tracker_view.load_events(persona.id, end, args.days)
+        if not events:
+            print(f"{persona.name}: no logs in the last {args.days} day(s)")
+            continue
+        print(f"{persona.name}: asking the local LLM (a minute or two)...", flush=True)
+        try:
+            result = tracker_view.evaluate(persona, events, end, args.days)
+        except httpx.HTTPError as exc:
+            print(f"error: cannot reach Ollama ({exc})", file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            print(f"  the LLM did not answer with valid JSON: {exc}")
+            continue
+        print(tracker_view.format_report(result, persona))
+        print(f"  saved {tracker_view.save(result)}\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agent.evaluation", description="Measure how well decoys hide.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -70,6 +93,11 @@ def main(argv: list[str] | None = None) -> int:
     report = sub.add_parser("fingerprint-report", help="compare the recorded fingerprints")
     report.add_argument("--date", help="YYYY-MM-DD, default today")
     report.set_defaults(func=cmd_report)
+    tracker = sub.add_parser("tracker", help="let the local LLM profile each persona from its logs, as a tracker would")
+    tracker.add_argument("persona_id", nargs="?", help="default: every persona")
+    tracker.add_argument("--days", type=int, default=7, help="how many days of logs, default 7")
+    tracker.add_argument("--date", help="last day YYYY-MM-DD, default today")
+    tracker.set_defaults(func=cmd_tracker)
     args = parser.parse_args(argv)
     return args.func(args)
 

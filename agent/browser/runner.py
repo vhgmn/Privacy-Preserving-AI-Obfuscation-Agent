@@ -110,6 +110,14 @@ def webdriver_flag(context: BrowserContext) -> object:
     return page.evaluate("navigator.webdriver")
 
 
+def _title(page) -> str | None:
+    """The page title, for the evaluation's tracker view (a URL alone often says little)."""
+    try:
+        return page.title()[:200] or None
+    except PlaywrightError:
+        return None
+
+
 def run_session(context: BrowserContext, persona: Persona, session: Session, log: SessionLog,
                 rng: random.Random | None = None, echo=print) -> str:
     """Executes the steps in order. Returns "done", "blocked" or "failed".
@@ -142,7 +150,7 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
                     log.write("open_result", rank=step.rank, url=url)
                 elif step.type == "read":
                     seconds = sites.read_page(page, behavior.reading_wpm, behavior.patience, rng)
-                    log.write("read", url=page.url, seconds=round(seconds))
+                    log.write("read", url=page.url, title=_title(page), seconds=round(seconds))
                     sites.back_to_results(page)
                 elif step.type == "youtube":
                     echo(f"  youtube: {step.query}")

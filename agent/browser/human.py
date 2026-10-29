@@ -6,7 +6,8 @@ import math
 import random
 import re
 
-MIN_READ_SECONDS, MAX_READ_SECONDS = 20, 240
+MIN_READ_SECONDS, MAX_READ_SECONDS = 15, 300
+USUAL_MAX_READ_SECONDS = 180  # long pages end somewhere between this and the maximum
 MIN_WATCH_SECONDS, MAX_WATCH_SECONDS = 30, 180
 
 # Pages that mean "a bot was noticed". The agent stops instead of trying to get past them.
@@ -69,7 +70,14 @@ def read_seconds(word_count: int, reading_wpm: int, patience: float, rng: random
     """How long a person stays on a page: part of the full reading time, more if patient."""
     full = word_count / reading_wpm * 60
     share = min(1.0, max(0.1, patience * rng.uniform(0.4, 1.2)))
-    return min(MAX_READ_SECONDS, max(MIN_READ_SECONDS, full * share * rng.uniform(0.85, 1.15)))
+    seconds = full * share * rng.uniform(0.85, 1.15)
+    # No fixed limits: a run of reads lasting exactly the same seconds would give the code away.
+    limit = rng.uniform(USUAL_MAX_READ_SECONDS, MAX_READ_SECONDS)
+    if seconds > limit:
+        seconds = limit * rng.uniform(0.75, 1.0)
+    if seconds < 2 * MIN_READ_SECONDS:
+        seconds = max(seconds, rng.uniform(MIN_READ_SECONDS, 2 * MIN_READ_SECONDS))  # even a glance takes a while
+    return seconds
 
 
 def watch_seconds(youtube_affinity: float, rng: random.Random) -> float:

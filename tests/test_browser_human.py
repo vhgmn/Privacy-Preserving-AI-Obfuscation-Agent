@@ -3,6 +3,7 @@ import math
 import random
 import tempfile
 import unittest
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -47,9 +48,13 @@ class TypingTest(unittest.TestCase):
 
 class TimingTest(unittest.TestCase):
     def test_read_seconds_bounds_and_patience(self):
-        rng = random.Random(1)
-        self.assertEqual(human.read_seconds(10, 240, 0.5, rng), human.MIN_READ_SECONDS)
-        self.assertEqual(human.read_seconds(100_000, 240, 1.0, rng), human.MAX_READ_SECONDS)
+        short = [human.read_seconds(10, 240, 0.5, random.Random(s)) for s in range(50)]
+        long = [human.read_seconds(100_000, 240, 1.0, random.Random(s)) for s in range(50)]
+        self.assertTrue(all(human.MIN_READ_SECONDS <= r <= 2 * human.MIN_READ_SECONDS for r in short))
+        self.assertTrue(all(0.75 * human.USUAL_MAX_READ_SECONDS <= r <= human.MAX_READ_SECONDS for r in long))
+        # no single limit that many reads end at
+        self.assertLessEqual(max(Counter(round(r) for r in long).values()), 3)
+        self.assertGreater(len({round(r) for r in short}), 10)
         patient = sum(human.read_seconds(1500, 240, 0.9, random.Random(s)) for s in range(50))
         hasty = sum(human.read_seconds(1500, 240, 0.1, random.Random(s)) for s in range(50))
         self.assertGreater(patient, hasty)
