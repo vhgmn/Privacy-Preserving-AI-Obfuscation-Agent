@@ -8,11 +8,17 @@ projects and habits, who will browse the web on their own schedule.
 All planning runs on a **local LLM** ([Ollama](https://ollama.com)), so no cloud
 service ever learns which traffic is fake.
 
-> **Status:** early development. Personas (phase 1), daily plans (phase 2), the
-> browser agent (phase 3, first version) and the scheduler (phase 4) work; the
-> scheduler is started by hand and still being tried out. Evaluation (phase 5) has
-> begun with a fingerprint audit and an LLM "tracker's eye view". See the
+> **Status:** research prototype, all phases in place. Personas, daily plans, the
+> browser agent and the scheduler work; the scheduler is started by hand. The
+> evaluation tools work and their first results are below and in the
+> [threat model](docs/THREAT_MODEL.md); results over a longer run are still to come.
+> Routing through Nym is built but not yet tried with a live Nym client. See the
 > [roadmap](#roadmap).
+>
+> **Read first:** [what this protects and what it does not](docs/THREAT_MODEL.md),
+> and [the rules it follows](docs/ETHICS.md). In short: decoys make a profile less
+> certain; they do not make you invisible, and all browser profiles on one computer
+> share one fingerprint.
 
 ## Principles
 
@@ -22,11 +28,13 @@ service ever learns which traffic is fake.
   contains no fixed personas, query lists or timing profiles; every install
   generates its own.
 - **No harm to the user.** Decoys never touch topics a tracker could hold against
-  the user: health, sexuality, political extremism, illegal activity, financial
-  distress, religion. Every topic is checked by the LLM and rejected if in doubt.
-- **No harm to others.** No CAPTCHA bypassing, no collection of other people's data.
-- **Separate identities.** Each persona will get its own persistent browser
-  profile, so decoy cookies and history never mix with each other.
+  the user: health (including diets), sexuality, political extremism, illegal
+  activity, financial distress, religion. Every topic is checked by the LLM and
+  rejected if in doubt.
+- **No harm to others.** No CAPTCHA bypassing, no ad clicks, no forms or sign-ins, no
+  collection of other people's data ([details](docs/ETHICS.md)).
+- **Separate identities.** Each persona has its own persistent browser profile, so
+  decoy cookies and history never mix with each other or with yours.
 
 ## How the Persona Engine works
 
@@ -357,6 +365,10 @@ agent/
     trackers.py       third parties that saw each persona, and those shared between personas
     __main__.py       command line
 tests/                unit tests
+docs/
+  THREAT_MODEL.md     adversaries, defences, what was measured, what is not protected
+  ETHICS.md           rules towards the user, websites and other people
+  NYM.md              routing decoys through the Nym mixnet
 ```
 
 ## Roadmap
@@ -372,7 +384,7 @@ tests/                unit tests
    parties per persona. Next: results over a week of running; longer, multi-topic sessions
 6. ✅ Optional routing of decoy traffic through the Nym mixnet: one proxy for all personas or
    one per persona ([docs/NYM.md](docs/NYM.md)); not yet tried with a live Nym client
-7. Threat model and ethics documentation
+7. ✅ [Threat model](docs/THREAT_MODEL.md) and [ethics](docs/ETHICS.md)
 
 ## License
 
