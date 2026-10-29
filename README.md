@@ -11,7 +11,8 @@ service ever learns which traffic is fake.
 > **Status:** early development. Personas (phase 1), daily plans (phase 2), the
 > browser agent (phase 3, first version) and the scheduler (phase 4) work; the
 > scheduler is started by hand and still being tried out. Evaluation (phase 5) has
-> begun with a fingerprint audit. See the [roadmap](#roadmap).
+> begun with a fingerprint audit and an LLM "tracker's eye view". See the
+> [roadmap](#roadmap).
 
 ## Principles
 
@@ -137,6 +138,30 @@ and one device fingerprint**, so a tracker that links by fingerprint sees one de
 The decoys then do not pose as separate people; they blend into the same device's
 traffic, where the user's own browsing must not stand out.
 
+## Evaluation: tracker's eye view
+
+`python -m agent.evaluation tracker` lets the local LLM play a tracker. It sees only
+what one could see in a persona's logs of the last 7 days, in two views: an
+**advertising network** (pages read with their titles, how long, YouTube searches)
+and a **search engine** (the searches). The topic and language the planner chose are
+the answer, so they are never shown. For each view the LLM:
+
+- builds an ad profile: age group, gender, city, job, interests, current projects;
+- rates from 0 to 10 how automated the visitor looks, and why;
+- names any excluded category (health, debt, ...) the visitor seems interested in.
+  Any hit is a problem in the decoys, since a tracker would pin it on the user.
+
+A separate judge call per guessed interest checks it against the persona's real
+interests, giving **recall** (how many real interests were found: high means the
+persona is coherent) and **precision**. Code also measures signs of automation that
+a small LLM misses: how bursty the pauses between sessions are, night sessions,
+reading times that repeat exactly, pages and searches repeated. Results go to
+`data/eval/tracker/<date>/`.
+
+The first test run, on a day of logs, already found two weaknesses that are now
+fixed: most reads ended at exactly the same 240 s limit, and "healthy" or "diet"
+recipe searches passed the safety check although a tracker files them under health.
+
 ## Armenian queries
 
 The small LLM writes good English and Russian but cannot write Armenian (it invents
@@ -211,6 +236,9 @@ profiles would be uploaded.
 .venv\Scripts\python.exe -m agent.evaluation fingerprint --mine
 .venv\Scripts\python.exe -m agent.evaluation fingerprint-report
 
+# tracker's eye view of every persona's last 7 days of logs (a few minutes per persona)
+.venv\Scripts\python.exe -m agent.evaluation tracker [<persona-id>] [--days 7]
+
 # let the agent run on its own schedule (leave the terminal open; Ctrl+C stops)
 .venv\Scripts\python.exe -m agent.scheduler run
 .venv\Scripts\python.exe -m agent.scheduler status
@@ -259,6 +287,7 @@ agent/
     __main__.py       command line
   evaluation/
     fingerprint.py    local fingerprint probe, the one-time 127.0.0.1 page, comparison report
+    tracker_view.py   the LLM as tracker and judge, automation signals measured by code
     __main__.py       command line
 tests/                unit tests
 ```
@@ -272,8 +301,8 @@ tests/                unit tests
    Next: follow-up searches based on the real results
 4. ✅ **Scheduler**: bursty, log-normal sessions within the user's waking hours; Windows idle detection;
    own virtual desktop. Next: start automatically at logon
-5. Evaluation: ✅ fingerprint audit (persona profiles vs. the user's Chrome); next: an LLM
-   "tracker's eye view", a real-vs-decoy classifier, and which tracker domains see each persona
+5. Evaluation: ✅ fingerprint audit (persona profiles vs. the user's Chrome); ✅ LLM "tracker's eye
+   view"; next: a real-vs-decoy classifier, and which tracker domains see each persona
 6. Optional routing of decoy traffic through the Nym mixnet
 7. Threat model and ethics documentation
 
