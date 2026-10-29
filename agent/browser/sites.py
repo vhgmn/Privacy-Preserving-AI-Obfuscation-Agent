@@ -23,6 +23,20 @@ _YOUTUBE_VIDEO_LINKS_JS = """() => [...document.querySelectorAll('a[href^="/watc
     .filter(a => a.offsetWidth > 0 && a.offsetHeight > 0)
     .map(a => a.getAttribute('href'))"""
 
+# Visible links outside headers, footers, forms and ad boxes. Listing them returns
+# [href, text]; called with an index, the same list marks that link so it can be clicked.
+_PAGE_LINKS_JS = """(pick) => {
+  const links = [...document.querySelectorAll('a[href]')]
+    .filter(a => !a.closest('header, footer, nav, form, ins, iframe, [class*="advert"], [id*="advert"], [class*="sponsor"]'))
+    .filter(a => a.offsetWidth > 0 && a.offsetHeight > 0)
+    .slice(0, 400);
+  if (pick === null) return links.map(a => [a.href, (a.innerText || '').trim().slice(0, 200)]);
+  document.querySelectorAll('a[data-picked]').forEach(a => a.removeAttribute('data-picked'));
+  links[pick].removeAttribute('target');  // same tab, so 'back' works
+  links[pick].setAttribute('data-picked', '');
+  return null;
+}"""
+
 
 class Blocked(RuntimeError):
     """The site showed a CAPTCHA or bot check. The agent stops; it never tries to get past one."""
@@ -191,8 +205,40 @@ def _scroll_for(page: Page, seconds: float, rng: random.Random) -> None:
     time.sleep(max(0.0, seconds - (time.monotonic() - started)))
 
 
-def back_to_results(page: Page) -> None:
-    page.go_back(wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+def follow_internal_link(page: Page, mouse: Mouse, visited: set[str], rng: random.Random) -> str:
+    """Clicks a link to another article on the same site (see human.choose_internal_link).
+    If the click does nothing (a hidden menu, a script link), one other link is tried."""
+    links = [(href, text) for href, text in page.evaluate(_PAGE_LINKS_JS, None)]
+    before = page.url
+    for attempt in (1, 2):
+        index = human.choose_internal_link(links, before, visited, rng)
+        if index is None:
+            raise PlaywrightError("no article link to follow")
+        href = links[index][0]
+        page.evaluate(_PAGE_LINKS_JS, index)
+        mouse.click(page.locator("a[data-picked]").first)
+        try:
+            wait_until(page, lambda: page.url != before, "the linked page to open", timeout_s=10)
+            break
+        except PlaywrightError as exc:
+            visited.add(href)  # not this one again
+            if attempt == 2:
+                raise PlaywrightError(f"{str(exc).splitlines()[0][:120]} (link {href[:120]})") from None
+    page.wait_for_load_state("domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    visited.update({href, page.url})
+    check_not_blocked(page)
+    dismiss_cookie_banner(page, mouse)
+    return page.url
+
+
+def back_to_results(page: Page, results_url: str | None = None) -> None:
+    """Back to the search results, however deep the reader went into the site."""
+    for _ in range(human.MAX_BROWSE_DEPTH + 2):
+        if urlparse(page.url).netloc.endswith("duckduckgo.com"):
+            return
+        page.go_back(wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    if results_url and not urlparse(page.url).netloc.endswith("duckduckgo.com"):
+        page.goto(results_url, wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
 
 
 def youtube(page: Page, mouse: Mouse, query: str, typo_rate: float, youtube_affinity: float,

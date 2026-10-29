@@ -13,7 +13,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from agent import config
-from agent.browser import sites
+from agent.browser import human, sites
 from agent.persona.schema import Persona
 from agent.planner.schema import Session
 
@@ -118,12 +118,31 @@ def _title(page) -> str | None:
         return None
 
 
+def _browse_site(page, mouse, persona: Persona, visited: set[str], log: SessionLog,
+                 rng: random.Random, echo) -> None:
+    """Follows a few links inside the site; stops quietly when there is nothing good to follow."""
+    behavior = persona.behavior
+    if not human.can_browse(page.url):
+        return
+    for _ in range(human.browse_depth(behavior.patience, rng)):
+        try:
+            url = sites.follow_internal_link(page, mouse, visited, rng)
+        except PlaywrightError as exc:
+            log.write("browse_stopped", reason=str(exc).splitlines()[0][:200])
+            return
+        echo(f"  browse: {url}")
+        log.write("browse", url=url)
+        seconds = sites.read_page(page, behavior.reading_wpm, behavior.patience, rng)
+        log.write("read", url=page.url, title=_title(page), seconds=round(seconds))
+
+
 def run_session(context: BrowserContext, persona: Persona, session: Session, log: SessionLog,
-                rng: random.Random | None = None, echo=print) -> str:
+                rng: random.Random | None = None, echo=print, browse: bool = True) -> str:
     """Executes the steps in order. Returns "done", "blocked" or "failed".
 
     A failed step (slow site, missing result) skips ahead to the next search, as a
-    person would; a bot check stops the whole session.
+    person would; a bot check stops the whole session. With `browse`, a read page may
+    lead to a few more articles on the same site, as reading usually does.
     """
     rng = rng or random.SystemRandom()
     page = context.pages[0] if context.pages else context.new_page()
@@ -134,6 +153,7 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
     skip_to_next_search = False
     failures = 0
     visited: set[str] = set()  # a person does not reread the page they just read
+    results_url = None
     try:
         for step in session.steps:
             if skip_to_next_search and step.type not in ("search", "youtube"):
@@ -145,13 +165,16 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
                     sites.ddg_search(page, mouse, step.query, behavior.typo_rate, rng)
                     log.write("search", query=step.query)
                 elif step.type == "open_result":
+                    results_url = page.url
                     url = sites.open_result(page, mouse, step.rank, visited)
                     echo(f"  open #{step.rank}: {url}")
                     log.write("open_result", rank=step.rank, url=url)
                 elif step.type == "read":
                     seconds = sites.read_page(page, behavior.reading_wpm, behavior.patience, rng)
                     log.write("read", url=page.url, title=_title(page), seconds=round(seconds))
-                    sites.back_to_results(page)
+                    if browse:
+                        _browse_site(page, mouse, persona, visited, log, rng, echo)
+                    sites.back_to_results(page, results_url)
                 elif step.type == "youtube":
                     echo(f"  youtube: {step.query}")
                     url, seconds = sites.youtube(page, mouse, step.query, behavior.typo_rate,

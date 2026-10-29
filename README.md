@@ -76,6 +76,9 @@ builds up its own cookies and history.
 - **Reading time** follows the page length, the persona's reading speed and patience
   (15 s to 5 min, with no fixed limit that many reads would end at). A page already
   read in the session is not opened again.
+- **Reading on:** after a page, the persona often follows up to three links to other
+  articles on the same site, more often the more patient it is (never menus, logins,
+  files or other sites, and not inside social networks, which only show a login wall).
 - **YouTube** videos are watched for 30 s to 3 min; Chrome runs muted.
 - Chrome starts without the automation flag, so `navigator.webdriver` is `false`
   (check with `python -m agent.browser check <persona-id>`). No other "stealth"
@@ -84,7 +87,8 @@ builds up its own cookies and history.
 Rules the agent never breaks:
 
 - On a **CAPTCHA or bot check it stops** the session and reports it. It never tries
-  to solve or get around one.
+  to solve or get around one. (A mere "protected by reCAPTCHA" on an ordinary page,
+  e.g. under a contact form, does not count.)
 - On a **cookie banner it only ever clicks "Reject"**; if there is none, it leaves the
   banner alone.
 - It **never fills in forms, signs in, downloads files or clicks ads**.

@@ -46,6 +46,50 @@ class TypingTest(unittest.TestCase):
         self.assertGreater(len(set(round(d, 3) for d in delays)), 100)  # not a fixed rhythm
 
 
+class BrowseTest(unittest.TestCase):
+    PAGE = "https://www.recipes.am/salads/greek"
+
+    def test_depth_grows_with_patience_and_is_bounded(self):
+        patient = [human.browse_depth(0.9, random.Random(s)) for s in range(300)]
+        hasty = [human.browse_depth(0.1, random.Random(s)) for s in range(300)]
+        self.assertGreater(sum(patient), 2 * sum(hasty))
+        self.assertLessEqual(max(patient), human.MAX_BROWSE_DEPTH)
+        self.assertIn(0, hasty)
+
+    def choose(self, links, visited=()):
+        return human.choose_internal_link(links, self.PAGE, set(visited), random.Random(1))
+
+    def test_only_article_links_on_the_same_site(self):
+        links = [
+            ("https://other.com/a-long-article-title", "A long article on another site"),
+            ("https://www.recipes.am/login", "Log in to your account now"),
+            ("https://www.recipes.am/menu.pdf", "Download the whole menu here"),
+            ("https://www.recipes.am/", "Back to the home page please"),
+            ("https://www.recipes.am/salads/greek", "This same page once more"),
+            ("https://www.recipes.am/soups", "Soups"),  # menu-like, one word
+            ("mailto:chef@recipes.am", "Write to the chef today"),
+            ("https://news.recipes.am/2026/winter-salads", "Ten winter salads to try"),
+        ]
+        self.assertEqual(self.choose(links), 7)  # a subdomain of the same site is fine
+
+    def test_same_page_with_other_slash_or_query_is_not_a_new_page(self):
+        links = [("https://recipes.am/salads/greek/?ref=menu", "The same Greek salad page again"),
+                 ("https://www.recipes.am/salads/caesar", "How to make a Caesar salad")]
+        self.assertEqual(self.choose(links), 1)
+        self.assertIsNone(self.choose(links[1:], visited={"https://recipes.am/salads/caesar/#top"}))
+
+    def test_no_browsing_inside_social_sites(self):
+        self.assertFalse(human.can_browse("https://www.facebook.com/someshop/"))
+        self.assertFalse(human.can_browse("https://m.vk.com/club1"))
+        self.assertTrue(human.can_browse("https://hy.wikipedia.org/wiki/Gyumri"))
+
+    def test_skips_visited_and_returns_none_when_nothing_fits(self):
+        links = [("https://www.recipes.am/salads/caesar", "How to make a Caesar salad")]
+        self.assertEqual(self.choose(links), 0)
+        self.assertIsNone(self.choose(links, visited={links[0][0]}))
+        self.assertIsNone(self.choose([]))
+
+
 class TimingTest(unittest.TestCase):
     def test_read_seconds_bounds_and_patience(self):
         short = [human.read_seconds(10, 240, 0.5, random.Random(s)) for s in range(50)]
@@ -84,6 +128,12 @@ class DetectionTest(unittest.TestCase):
                      "Unfortunately, bots use DuckDuckGo too", "Подтвердите, что вы не робот"):
             self.assertTrue(human.is_blocked(text), text)
         self.assertFalse(human.is_blocked("Best fridges of 2026 reviewed"))
+
+    def test_recaptcha_on_an_ordinary_page_is_not_a_bot_check(self):
+        article = "Birds of Armenia. " + "The lammergeier nests in the gorges of Syunik. " * 60
+        self.assertFalse(human.is_blocked(article + " Contact us. This site is protected by reCAPTCHA."))
+        self.assertTrue(human.is_blocked(article + " Our systems have detected unusual traffic"))  # strong sign
+        self.assertTrue(human.is_blocked("Checking your browser... I'm not a robot"))  # short page
 
     def test_only_reject_buttons_are_clicked(self):
         for label in ("Reject all", "Decline", "Отклонить", " Մերժել "):

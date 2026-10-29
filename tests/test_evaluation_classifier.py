@@ -49,9 +49,11 @@ class SessionTest(unittest.TestCase):
             {"time": "2026-01-15T10:00:05+00:00", "event": "search", "query": "q"},
             {"time": "2026-01-15T10:00:09+00:00", "event": "open_result", "url": "https://www.shop.am/a"},
             {"time": "2026-01-15T10:02:00+00:00", "event": "read", "url": "https://www.shop.am/a"},
+            {"time": "2026-01-15T10:02:05+00:00", "event": "browse", "url": "https://www.shop.am/b"},
             {"time": "2026-01-15T10:05:00+00:00", "event": "youtube", "query": "q", "url": "https://youtube.com/w"},
         ]
-        self.assertEqual([n for _, n in classifier.decoy_visits(events)], ["duckduckgo.com", "shop.am", "youtube.com"])
+        self.assertEqual([n for _, n in classifier.decoy_visits(events)],
+                         ["duckduckgo.com", "shop.am", "shop.am", "youtube.com"])
 
     def test_sessions_split_on_long_pauses_and_merge_reloads(self):
         visits = [(T0, "a.com"), (T0 + timedelta(seconds=1), "a.com"), (T0 + timedelta(minutes=10), "b.com"),

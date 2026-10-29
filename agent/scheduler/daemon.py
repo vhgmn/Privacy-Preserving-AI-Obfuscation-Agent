@@ -160,7 +160,7 @@ class Daemon:
         log.write("scheduled", mode=mode, idle_seconds=round(self.idle()))
         try:
             with persona_browser(persona, on_own_desktop=True, echo=self.echo) as context:
-                return run_session(context, persona, session, log, echo=self.echo)
+                return run_session(context, persona, session, log, echo=self.echo, browse=mode != "short")
         except PlaywrightError as exc:
             message = str(exc).splitlines()[0][:200]
             self.echo(f"  could not run: {message}")

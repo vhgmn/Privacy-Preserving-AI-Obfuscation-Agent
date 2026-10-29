@@ -5,17 +5,33 @@ from __future__ import annotations
 import math
 import random
 import re
+from urllib.parse import urlsplit
 
 MIN_READ_SECONDS, MAX_READ_SECONDS = 15, 300
 USUAL_MAX_READ_SECONDS = 180  # long pages end somewhere between this and the maximum
 MIN_WATCH_SECONDS, MAX_WATCH_SECONDS = 30, 180
+MAX_BROWSE_DEPTH = 3  # links followed inside one site after reading a result
+# Without an account these show a login wall; nobody browses deeper into them.
+SOCIAL_SITES = ("facebook.com", "instagram.com", "x.com", "twitter.com", "tiktok.com", "vk.com", "ok.ru",
+                "linkedin.com")
+
+# Links a person reading an article would not follow, or that the agent must never use.
+_SKIP_LINK = re.compile(
+    r"login|log-in|signin|sign-in|signup|sign-up|register|account|profile|cart|basket|checkout|order|subscribe"
+    r"|download|print|share|logout|password|contact|privacy|cookie|terms|wp-admin|feed|rss"
+    r"|\.(pdf|zip|rar|exe|msi|apk|docx?|xlsx?|pptx?|jpe?g|png|gif|webp|mp3|mp4)(\?|$)",
+    re.IGNORECASE,
+)
 
 # Pages that mean "a bot was noticed". The agent stops instead of trying to get past them.
 _BLOCK_PATTERNS = re.compile(
-    r"captcha|unusual traffic|are you a robot|not a robot|verify you are human|bots use duckduckgo too"
-    r"|подтвердите, что вы не робот|необычный трафик",
+    r"unusual traffic|verify you are human|bots use duckduckgo too|подтвердите, что вы не робот|необычный трафик",
     re.IGNORECASE,
 )
+# Words that also appear on ordinary pages (a contact form "protected by reCAPTCHA"), so they
+# only count on a page with little else on it, as real bot-check pages are.
+_WEAK_BLOCK_PATTERNS = re.compile(r"captcha|are you a robot|not a robot", re.IGNORECASE)
+BLOCK_PAGE_MAX_CHARS = 1500
 # Cookie banners: only ever click a button that refuses. Accepting is never automated.
 _REJECT_BUTTON = re.compile(
     r"^\s*(reject all|reject|decline|decline all|refuse|only necessary|necessary only"
@@ -25,7 +41,10 @@ _REJECT_BUTTON = re.compile(
 
 
 def is_blocked(text: str) -> bool:
-    return bool(_BLOCK_PATTERNS.search(text or ""))
+    text = text or ""
+    if _BLOCK_PATTERNS.search(text):
+        return True
+    return len(" ".join(text.split())) <= BLOCK_PAGE_MAX_CHARS and bool(_WEAK_BLOCK_PATTERNS.search(text))
 
 
 def is_reject_button(label: str) -> bool:
@@ -78,6 +97,52 @@ def read_seconds(word_count: int, reading_wpm: int, patience: float, rng: random
     if seconds < 2 * MIN_READ_SECONDS:
         seconds = max(seconds, rng.uniform(MIN_READ_SECONDS, 2 * MIN_READ_SECONDS))  # even a glance takes a while
     return seconds
+
+
+def browse_depth(patience: float, rng: random.Random) -> int:
+    """How many links inside the site to follow after reading a page: often none or one,
+    more for a patient reader."""
+    depth = 0
+    while depth < MAX_BROWSE_DEPTH and rng.random() < 0.3 + 0.4 * patience:
+        depth += 1
+    return depth
+
+
+def _site(host: str) -> str:
+    """Rough site name: the last two labels (news.example.am -> example.am)."""
+    return ".".join(host.lower().removeprefix("www.").split(".")[-2:])
+
+
+def page_key(url: str) -> str:
+    """What makes two addresses the same page: host and path, without a trailing slash,
+    query or fragment (facebook.com/shop/ and facebook.com/shop?ref=x are one page)."""
+    parts = urlsplit(url)
+    return (parts.hostname or "").lower().removeprefix("www.") + parts.path.rstrip("/")
+
+
+def can_browse(url: str) -> bool:
+    return _site(urlsplit(url).hostname or "") not in SOCIAL_SITES
+
+
+def choose_internal_link(links: list[tuple[str, str]], current: str, visited: set[str],
+                         rng: random.Random) -> int | None:
+    """Index of a link (href, visible text) to another article on the same site, or None.
+
+    Article links have a few words of text; menus, logins, files and other sites are skipped.
+    """
+    here = urlsplit(current)
+    seen = {page_key(url) for url in visited} | {page_key(current)}
+    candidates, weights = [], []
+    for i, (href, text) in enumerate(links):
+        target = urlsplit(href)
+        words = len(text.split())
+        if (target.scheme not in ("http", "https") or _site(target.hostname or "") != _site(here.hostname or "")
+                or page_key(href) in seen or target.path in ("", "/") or _SKIP_LINK.search(href)
+                or not 3 <= words <= 25):
+            continue
+        candidates.append(i)
+        weights.append(min(words, 12))  # headline-like texts are more tempting than "more"
+    return rng.choices(candidates, weights)[0] if candidates else None
 
 
 def watch_seconds(youtube_affinity: float, rng: random.Random) -> float:
