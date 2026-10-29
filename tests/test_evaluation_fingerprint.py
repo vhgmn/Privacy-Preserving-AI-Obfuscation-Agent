@@ -99,11 +99,12 @@ class ServeProbeTest(unittest.TestCase):
         self.assertIn("canvasHash", result["fp"])
 
     def test_wrong_token_is_refused(self):
-        url, thread, result = self.run_server(timeout=2)
+        # long enough that the server is still up for both requests on a busy machine
+        url, thread, result = self.run_server(timeout=6)
         base = url.rsplit("/", 1)[0]
         self.assertEqual(httpx.get(base + "/guess").status_code, 404)
         self.assertEqual(httpx.post(base + "/guess/submit", content="{}").status_code, 404)
-        thread.join(5)
+        thread.join(10)
         self.assertIsNone(result["fp"])
 
 
