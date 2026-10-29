@@ -205,6 +205,15 @@ def _scroll_for(page: Page, seconds: float, rng: random.Random) -> None:
     time.sleep(max(0.0, seconds - (time.monotonic() - started)))
 
 
+def visit(page: Page, mouse: Mouse, url: str, visited: set[str]) -> str:
+    """Goes straight to a favourite site, as from a bookmark or the address bar."""
+    page.goto(url, wait_until="domcontentloaded", timeout=LOAD_TIMEOUT_MS)
+    check_not_blocked(page)
+    dismiss_cookie_banner(page, mouse)
+    visited.update({url, page.url})
+    return page.url
+
+
 def follow_internal_link(page: Page, mouse: Mouse, visited: set[str], rng: random.Random) -> str:
     """Clicks a link to another article on the same site (see human.choose_internal_link).
     If the click does nothing (a hidden menu, a script link), one other link is tried."""

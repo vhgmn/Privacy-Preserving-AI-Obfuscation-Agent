@@ -51,5 +51,5 @@ def decide(now: datetime, idle_seconds: float, waking_hours: frozenset[int], nex
 
 
 def short_version(session: Session) -> Session:
-    """One search, one result, one read: what someone does in a quick look while passing by."""
-    return replace(session, steps=session.steps[:3])
+    """One page, found by a search or visited directly: what someone does in a quick look while passing by."""
+    return replace(session, steps=session.steps[:2] if session.steps[0].type == "visit" else session.steps[:3])

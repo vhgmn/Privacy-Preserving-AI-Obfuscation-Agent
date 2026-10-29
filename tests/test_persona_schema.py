@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agent.persona import store
-from agent.persona.schema import Behavior, Interest, Persona
+from agent.persona.schema import Behavior, Favorite, Interest, Persona
 
 NOW = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -87,11 +87,29 @@ class PersonaSchemaTest(unittest.TestCase):
 
     def test_v1_file_is_migrated(self):
         data = make_persona().to_dict()
-        del data["past_projects"]
+        del data["past_projects"], data["favorites"]
         data["schema_version"] = 1
         persona = Persona.from_dict(data)
-        self.assertEqual(persona.schema_version, 2)
-        self.assertEqual(persona.past_projects, [])
+        self.assertEqual(persona.schema_version, 3)
+        self.assertEqual((persona.past_projects, persona.favorites), ([], []))
+
+    def test_v2_file_gets_no_favorites(self):
+        data = make_persona().to_dict()
+        del data["favorites"]
+        data["schema_version"] = 2
+        self.assertEqual(Persona.from_dict(data).favorites, [])
+
+    def test_favorites_round_trip_and_limits(self):
+        since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        favorite = Favorite("news.am", "https://news.am/", since)
+        persona = make_persona(favorites=[favorite])
+        self.assertEqual(Persona.from_dict(persona.to_dict()).favorites, [favorite])
+        with self.assertRaises(ValueError):
+            make_persona(favorites=[favorite, Favorite("news.am", "https://www.news.am/", since)])
+        with self.assertRaises(ValueError):
+            make_persona(favorites=[Favorite(f"s{n}.am", f"https://s{n}.am/", since) for n in range(6)])
+        with self.assertRaises(ValueError):
+            Favorite("x.am", "ftp://x.am/", since)
 
     def test_rejects_invalid_past_projects(self):
         for label, value in {"too many": [f"p{n}" for n in range(11)], "empty item": [" "], "not a list": "x"}.items():

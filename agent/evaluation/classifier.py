@@ -75,7 +75,7 @@ def decoy_visits(events: list[dict]) -> list[Visit]:
         when = datetime.fromisoformat(event["time"]).astimezone()
         if kind == "search":
             visits.append((when, "duckduckgo.com"))
-        elif kind in ("open_result", "browse") and domain(event.get("url", "")):
+        elif kind in ("open_result", "browse", "visit") and domain(event.get("url", "")):
             visits.append((when, domain(event["url"])))
         elif kind == "youtube":
             visits.append((when, "youtube.com"))

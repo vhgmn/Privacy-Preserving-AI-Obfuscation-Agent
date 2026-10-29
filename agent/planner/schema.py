@@ -7,10 +7,10 @@ from datetime import date, datetime
 from agent import config
 from agent.persona.schema import _check_aware, _check_keys, _check_text, _parse_dt, _require, is_valid_id
 
-SCHEMA_VERSION = 1
-SOURCES = ("long_term", "project", "past_project")
+SCHEMA_VERSION = 2
+SOURCES = ("long_term", "project", "past_project", "habit")  # habit: only favourite sites, no search
 ENGINES = ("duckduckgo",)
-STEP_TYPES = ("search", "open_result", "read", "youtube")
+STEP_TYPES = ("search", "open_result", "read", "youtube", "visit")  # visit: straight to a favourite site
 MIN_SESSIONS, MAX_SESSIONS = 2, 5
 MAX_RANK = 5
 MAX_QUERY_WORDS = 8
@@ -46,6 +46,7 @@ class Step:
     query: str | None = None
     rank: int | None = None
     replaceable: bool = False  # a planned follow-up the browser agent may swap for one based on real results
+    url: str | None = None  # visit only
 
     def __post_init__(self) -> None:
         _require(self.type in STEP_TYPES, f"step type: expected one of {STEP_TYPES}, got {self.type!r}")
@@ -58,6 +59,11 @@ class Step:
                      f"open_result.rank: expected 1..{MAX_RANK}, got {self.rank!r}")
         else:
             _require(self.rank is None, f"{self.type}: takes no rank")
+        if self.type == "visit":
+            _require(isinstance(self.url, str) and self.url.startswith(("http://", "https://")),
+                     f"visit.url: expected http(s) address, got {self.url!r}")
+        else:
+            _require(self.url is None, f"{self.type}: takes no url")
         _require(isinstance(self.replaceable, bool), "replaceable: expected bool")
         _require(not self.replaceable or self.type == "search", f"{self.type}: only searches are replaceable")
 
@@ -69,13 +75,15 @@ class Step:
             data["rank"] = self.rank
         if self.replaceable:
             data["replaceable"] = True
+        if self.url is not None:
+            data["url"] = self.url
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> Step:
-        _check_keys(data, {"type", "query", "rank", "replaceable"}, "step")
+        _check_keys(data, {"type", "query", "rank", "replaceable", "url"}, "step")
         return cls(type=data.get("type"), query=data.get("query"), rank=data.get("rank"),
-                   replaceable=data.get("replaceable", False))
+                   replaceable=data.get("replaceable", False), url=data.get("url"))
 
 
 @dataclass
@@ -94,16 +102,22 @@ class Session:
         _require(isinstance(self.steps, list) and self.steps, "steps: expected non-empty list")
         _require(all(isinstance(s, Step) for s in self.steps), "steps: expected Step items")
         first = self.steps[0]
-        _require(first.type == "search" and not first.replaceable, "steps: must start with a fixed search")
-        previous = None
+        _require((first.type == "search" and not first.replaceable) or first.type == "visit",
+                 "steps: must start with a fixed search or a visit")
+        if self.source == "habit":
+            _require(all(s.type in ("visit", "read") for s in self.steps), "habit session: only visits and reads")
+        previous, on_results = None, False
         for step in self.steps:
             if step.type == "open_result":
-                _require(previous is not None and previous.type in ("search", "read"),
-                         "open_result: must follow a search or a read")
+                _require(on_results and previous.type in ("search", "read"),
+                         "open_result: must follow a search, or a read of a search result")
             if step.type == "read":
-                _require(previous is not None and previous.type == "open_result", "read: must follow open_result")
+                _require(previous is not None and previous.type in ("open_result", "visit"),
+                         "read: must follow open_result or visit")
             if step.type in ("search", "youtube"):
                 check_query(step.query, self.language, f"{step.type}.query")
+            if step.type in ("search", "visit", "youtube"):
+                on_results = step.type == "search"
             previous = step
         searches = [s.query.casefold() for s in self.steps if s.type == "search"]
         _require(len(searches) == len(set(searches)), "steps: duplicate search queries")
@@ -147,6 +161,8 @@ class DailyPlan:
     @classmethod
     def from_dict(cls, data: dict) -> DailyPlan:
         _check_keys(data, {"schema_version", "persona_id", "date", "created_at", "sessions"}, "plan")
+        if data.get("schema_version") == 1:  # version 2 only added visits; old plans are valid as they are
+            data = {**data, "schema_version": 2}
         sessions = data.get("sessions")
         _require(isinstance(sessions, list), "sessions: expected list")
         raw_date = data.get("date")

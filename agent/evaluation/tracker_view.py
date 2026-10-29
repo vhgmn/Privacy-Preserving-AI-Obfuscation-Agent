@@ -11,12 +11,13 @@ import json
 import statistics
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
 from urllib.parse import unquote, urlsplit
 
 from agent import config, llm
+from agent.browser.runner import load_events  # noqa: F401 (part of this module's interface)
 from agent.persona.schema import AGE_GROUPS, Persona
 
 LLM = Callable[..., str]  # same signature as llm.generate
@@ -29,16 +30,6 @@ VIEWS = {
     "ads": "an advertising network whose scripts run on the pages this visitor read and on YouTube",
     "search": "a search engine that received this visitor's searches",
 }
-
-
-def load_events(persona_id: str, end: date, days: int, directory: Path | None = None) -> list[dict]:
-    root = directory or config.DATA_DIR / "logs"
-    events = []
-    for offset in range(days - 1, -1, -1):
-        path = root / (end - timedelta(days=offset)).isoformat() / f"{persona_id}.jsonl"
-        if path.exists():
-            events += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return events
 
 
 def _when(event: dict) -> str:

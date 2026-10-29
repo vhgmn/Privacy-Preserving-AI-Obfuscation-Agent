@@ -16,6 +16,8 @@ CREATIVE = {"temperature": 0.8}
 PROJECT_BOOST = 2.0  # someone choosing a fridge searches for it nearly every day
 MAX_PROJECT_SESSIONS_PER_DAY = 2
 PAST_PROJECT_CHANCE = 0.1  # e.g. looking up the warranty of the fridge bought last month
+HABIT_SESSION_CHANCE = 0.2  # a session that is only a look at favourite sites, like checking the news
+FAVORITE_VISIT_CHANCE = 0.4  # a topic session that also stops by a favourite site, before or after
 LANGUAGE_NAMES = {"en": "English", "ru": "Russian"}
 STYLE_HINTS = {
     "keywords": "short keyword fragments, no question words",
@@ -117,6 +119,21 @@ def _session(llm_fn: LLM, translate_fn: Translate | None, persona: Persona, rng:
     return Session(topic=topic, source=source, language=language, engine="duckduckgo", steps=steps)
 
 
+def _habit_session(persona: Persona, rng: random.Random) -> Session:
+    """One or two favourite sites, no search: needs no LLM."""
+    sites = rng.sample(persona.favorites, min(len(persona.favorites), 2 if rng.random() < 0.5 else 1))
+    steps = [step for f in sites for step in (Step("visit", url=f.url), Step("read"))]
+    language = max(persona.languages, key=persona.languages.get)  # unused by visits, required by the schema
+    return Session(topic="favourite sites", source="habit", language=language, engine="duckduckgo", steps=steps)
+
+
+def _with_favorite_visit(session: Session, persona: Persona, rng: random.Random) -> Session:
+    visit = [Step("visit", url=rng.choice(persona.favorites).url), Step("read")]
+    steps = visit + session.steps if rng.random() < 0.5 else session.steps + visit
+    return Session(topic=session.topic, source=session.source, language=session.language,
+                   engine=session.engine, steps=steps)
+
+
 def plan_day(persona: Persona, day: date, llm_fn: LLM = llm.generate, translate_fn: Translate | None = None,
              rng: random.Random | None = None, now: datetime | None = None) -> tuple[DailyPlan, list[str]]:
     """Plans one day for one persona. Returns the plan and human-readable warnings. Does not save."""
@@ -132,10 +149,17 @@ def plan_day(persona: Persona, day: date, llm_fn: LLM = llm.generate, translate_
     target = rng.randint(MIN_SESSIONS, MAX_SESSIONS)
     sessions, used = [], Counter()
     for _ in range(target):
+        if persona.favorites and rng.random() < HABIT_SESSION_CHANCE:
+            sessions.append(_habit_session(persona, rng))
+            continue
         try:
-            sessions.append(_session(llm_fn, translate_fn, persona, rng, now, used, armenian_ok))
+            session = _session(llm_fn, translate_fn, persona, rng, now, used, armenian_ok)
         except GenerationError as exc:
             warnings.append(f"skipped a session: {exc}")
+            continue
+        if persona.favorites and rng.random() < FAVORITE_VISIT_CHANCE:
+            session = _with_favorite_visit(session, persona, rng)
+        sessions.append(session)
     if len(sessions) < MIN_SESSIONS:
         raise GenerationError(f"only {len(sessions)} of {target} sessions could be planned: {warnings}")
     try:

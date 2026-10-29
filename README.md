@@ -48,6 +48,11 @@ Long-term interests persist; projects (e.g. "choosing a new fridge") expire afte
 with a new one that fits the persona and remembers the last ten finished projects,
 so the new ones do not repeat them.
 
+**Favourite sites** grow out of the persona's own reading, so no list of sites ships
+with the code: each morning, a site where it read a page for a minute or more, or read
+on into, in the last two weeks may become a favourite (30% chance a day, at most five),
+and each favourite is forgotten again with a 3% chance a day.
+
 ## How the Daily Planner works
 
 Every day each persona gets 2–5 **sessions**. A session is one search journey on one
@@ -55,6 +60,9 @@ topic: a first search, 1–3 follow-up searches that refine it, results to open 
 read, and sometimes a YouTube search. Topics are picked by weight; projects come up
 more often (at most twice a day), and now and then a finished project returns.
 Each session uses one of the persona's languages and its search style.
+Once a persona has favourite sites, 40% of its sessions also stop by one (before or
+after the search), and 20% are only a look at one or two favourites, with no search,
+as people check the news.
 
 The plan says *what* to do, not *when*: timing belongs to the scheduler (phase 4).
 Follow-up searches are marked replaceable, so the browser agent (phase 3) can swap
@@ -270,6 +278,7 @@ agent/
     generator.py      staged LLM generation with safety checks and retries
     store.py          atomic JSON storage in data/personas/
     names.py          Armenian first names
+    favorites.py      favourite sites learned from the persona's own reading
     __main__.py       command line
   planner/
     schema.py         DailyPlan / Session / Step, step order and language checks

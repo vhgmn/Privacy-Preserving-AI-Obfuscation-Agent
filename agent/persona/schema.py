@@ -7,12 +7,13 @@ from typing import Any
 
 from agent import config
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 AGE_GROUPS = ("18-24", "25-34", "35-44", "45-54", "55+")
 INTEREST_KINDS = ("long_term", "project")
 QUERY_STYLES = ("keywords", "questions", "mixed")
 MIN_INTERESTS, MAX_INTERESTS = 3, 6
 MAX_PAST_PROJECTS = 10
+MAX_FAVORITES = 5
 
 _ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
@@ -135,6 +136,28 @@ class Behavior:
 
 
 @dataclass
+class Favorite:
+    """A site the persona keeps coming back to, learned from its own reading (agent/persona/favorites.py)."""
+    site: str
+    url: str  # the home page; the persona reads on from there
+    since: datetime
+
+    def __post_init__(self) -> None:
+        _check_text(self.site, "favorite.site")
+        _require(isinstance(self.url, str) and self.url.startswith(("http://", "https://")),
+                 f"favorite.url: expected http(s) address, got {self.url!r}")
+        _check_aware(self.since, "favorite.since")
+
+    def to_dict(self) -> dict:
+        return {"site": self.site, "url": self.url, "since": self.since.isoformat()}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Favorite:
+        _check_keys(data, {"site", "url", "since"}, "favorite")
+        return cls(site=data.get("site"), url=data.get("url"), since=_parse_dt(data.get("since"), "favorite.since"))
+
+
+@dataclass
 class Persona:
     id: str
     name: str
@@ -146,6 +169,7 @@ class Persona:
     behavior: Behavior
     created_at: datetime
     past_projects: list[str] = field(default_factory=list)  # topics of finished projects, oldest first
+    favorites: list[Favorite] = field(default_factory=list)
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -175,6 +199,10 @@ class Persona:
                  f"past_projects: at most {MAX_PAST_PROJECTS}, got {len(self.past_projects)}")
         for topic in self.past_projects:
             _check_text(topic, "past_projects item")
+        _require(isinstance(self.favorites, list) and all(isinstance(f, Favorite) for f in self.favorites),
+                 "favorites: expected Favorite items")
+        _require(len(self.favorites) <= MAX_FAVORITES, f"favorites: at most {MAX_FAVORITES}, got {len(self.favorites)}")
+        _require(len({f.site for f in self.favorites}) == len(self.favorites), "favorites: duplicate sites")
         _require(self.schema_version == SCHEMA_VERSION,
                  f"schema_version: expected {SCHEMA_VERSION}, got {self.schema_version!r}")
 
@@ -191,15 +219,19 @@ class Persona:
             "behavior": self.behavior.to_dict(),
             "created_at": self.created_at.isoformat(),
             "past_projects": list(self.past_projects),
+            "favorites": [f.to_dict() for f in self.favorites],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> Persona:
         data = _migrate(data)
         _check_keys(data, {"schema_version", "id", "name", "age_group", "occupation", "city",
-                           "languages", "interests", "behavior", "created_at", "past_projects"}, "persona")
+                           "languages", "interests", "behavior", "created_at", "past_projects", "favorites"},
+                    "persona")
         interests = data.get("interests")
         _require(isinstance(interests, list), "interests: expected list")
+        favorites = data.get("favorites")
+        _require(isinstance(favorites, list), "favorites: expected list")
         return cls(
             id=data.get("id"),
             name=data.get("name"),
@@ -211,6 +243,7 @@ class Persona:
             behavior=Behavior.from_dict(data.get("behavior")),
             created_at=_parse_dt(data.get("created_at"), "created_at"),
             past_projects=data.get("past_projects"),
+            favorites=[Favorite.from_dict(f) for f in favorites],
             schema_version=data.get("schema_version"),
         )
 
@@ -219,4 +252,6 @@ def _migrate(data: Any) -> Any:
     """Upgrades personas saved by older versions; the file itself is rewritten on the next save."""
     if isinstance(data, dict) and data.get("schema_version") == 1:
         data = {**data, "schema_version": 2, "past_projects": []}
+    if isinstance(data, dict) and data.get("schema_version") == 2:
+        data = {**data, "schema_version": 3, "favorites": []}
     return data

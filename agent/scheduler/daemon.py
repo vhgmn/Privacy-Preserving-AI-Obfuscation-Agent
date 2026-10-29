@@ -10,6 +10,7 @@ import httpx
 from playwright.sync_api import Error as PlaywrightError
 
 from agent.browser.runner import SessionLog, persona_browser, run_session
+from agent.persona import favorites
 from agent.persona import store as persona_store
 from agent.persona.generator import GenerationError, refresh_persona
 from agent.persona.schema import Persona
@@ -137,6 +138,11 @@ class Daemon:
         self.echo(f"Preparing {day}: refreshing personas and planning (takes a few minutes)...")
         personas = persona_store.list_all()
         for index, persona in enumerate(personas):
+            learned = favorites.update_from_logs(persona, day, self.rng)
+            if learned:
+                persona_store.save(learned)
+                personas[index] = persona = learned
+                self.echo(f"  {persona.name}: favourite sites now {', '.join(f.site for f in persona.favorites) or 'none'}")
             try:
                 updated = refresh_persona(persona, personas[:index] + personas[index + 1:])
                 if updated:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import random
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -69,6 +69,17 @@ def _user_languages() -> str | None:
 
     mine = latest_mine()
     return mine.get("languages") if mine else None
+
+
+def load_events(persona_id: str, end: date, days: int, directory: Path | None = None) -> list[dict]:
+    """A persona's logged events of the `days` days up to `end`, oldest first."""
+    root = directory or _logs_dir()
+    events = []
+    for offset in range(days - 1, -1, -1):
+        path = root / (end - timedelta(days=offset)).isoformat() / f"{persona_id}.jsonl"
+        if path.exists():
+            events += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return events
 
 
 @contextmanager
@@ -156,7 +167,7 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
     results_url = None
     try:
         for step in session.steps:
-            if skip_to_next_search and step.type not in ("search", "youtube"):
+            if skip_to_next_search and step.type not in ("search", "youtube", "visit"):
                 continue
             skip_to_next_search = False
             try:
@@ -164,6 +175,11 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
                     echo(f"  search: {step.query}")
                     sites.ddg_search(page, mouse, step.query, behavior.typo_rate, rng)
                     log.write("search", query=step.query)
+                elif step.type == "visit":
+                    results_url = None  # no search to go back to after reading
+                    url = sites.visit(page, mouse, step.url, visited)
+                    echo(f"  visit: {url}")
+                    log.write("visit", url=url)
                 elif step.type == "open_result":
                     results_url = page.url
                     url = sites.open_result(page, mouse, step.rank, visited)
@@ -174,7 +190,8 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
                     log.write("read", url=page.url, title=_title(page), seconds=round(seconds))
                     if browse:
                         _browse_site(page, mouse, persona, visited, log, rng, echo)
-                    sites.back_to_results(page, results_url)
+                    if results_url:
+                        sites.back_to_results(page, results_url)
                 elif step.type == "youtube":
                     echo(f"  youtube: {step.query}")
                     url, seconds = sites.youtube(page, mouse, step.query, behavior.typo_rate,
@@ -190,6 +207,7 @@ def run_session(context: BrowserContext, persona: Persona, session: Session, log
         echo(f"  STOPPED: {exc}. Not trying to get past it.")
         log.write("blocked", url=page.url, reason=str(exc))
         return "blocked"
-    outcome = "failed" if failures and failures >= len([s for s in session.steps if s.type == "search"]) else "done"
+    starts = len([s for s in session.steps if s.type in ("search", "visit")])
+    outcome = "failed" if failures and failures >= starts else "done"
     log.write("session_end", outcome=outcome, failures=failures)
     return outcome
